@@ -1,0 +1,1167 @@
+from pathlib import Path
+import os
+
+import duckdb
+import pandas as pd
+from catboost import CatBoostRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+
+
+# --------------------------------------------------
+# 1. Configuration
+# --------------------------------------------------
+
+PROJECT_DIR = Path(__file__).resolve().parents[3]
+DB_PATH = PROJECT_DIR / "analysis.duckdb"
+TEMP_DIR = PROJECT_DIR / "duckdb_temp"
+
+MODEL_PATH = PROJECT_DIR / "models" / "catboost_demand_model_v3_mae_6000.cbm"
+
+DUCKDB_THREADS = max(1, os.cpu_count() or 4)
+
+
+if not DB_PATH.exists():
+    raise FileNotFoundError(
+        f"Database not found: {DB_PATH}"
+    )
+
+if not MODEL_PATH.exists():
+    raise FileNotFoundError(
+        f"CatBoost model not found: {MODEL_PATH}"
+    )
+
+TEMP_DIR.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+
+# --------------------------------------------------
+# 2. Feature definitions
+# --------------------------------------------------
+
+categorical_features = [
+    "FIRMA_ID",
+    "GUZERGAH_KODU",
+    "canonical_guzergah_id",
+    "month",
+    "day_of_week",
+    "departure_30min_bucket",
+]
+
+calendar_numeric_features = [
+    "week_of_year",
+    "departure_minute",
+]
+
+historical_group_definitions = [
+    (
+        "company_route_time_weekday",
+        [
+            "FIRMA_ID",
+            "canonical_guzergah_id",
+            "departure_30min_bucket",
+            "day_of_week",
+        ],
+    ),
+    (
+        "company_route_time",
+        [
+            "FIRMA_ID",
+            "canonical_guzergah_id",
+            "departure_30min_bucket",
+        ],
+    ),
+    (
+        "canonical_route_time_weekday",
+        [
+            "canonical_guzergah_id",
+            "departure_30min_bucket",
+            "day_of_week",
+        ],
+    ),
+    (
+        "canonical_route",
+        [
+            "canonical_guzergah_id",
+        ],
+    ),
+    (
+        "company",
+        [
+            "FIRMA_ID",
+        ],
+    ),
+]
+
+historical_statistic_suffixes = [
+    "average",
+    "median",
+    "std",
+    "maximum",
+    "p90",
+    "above_60_rate",
+    "above_100_rate",
+    "count",
+]
+
+historical_features = [
+    f"{prefix}_{suffix}"
+    for prefix, _ in historical_group_definitions
+    for suffix in historical_statistic_suffixes
+]
+
+feature_columns = (
+    categorical_features
+    + calendar_numeric_features
+    + historical_features
+)
+
+source_columns = [
+    "SEFER_TARIHI",
+    "FIRMA_ID",
+    "GUZERGAH_KODU",
+    "canonical_guzergah_id",
+    "target",
+    "month",
+    "week_of_year",
+    "day_of_week",
+    "departure_minute",
+    "departure_30min_bucket",
+]
+
+
+# --------------------------------------------------
+# 3. SQL helper functions
+# --------------------------------------------------
+
+def sql_identifier_list(
+    columns: list[str],
+) -> str:
+    return ", ".join(columns)
+
+
+def create_source_tables(
+    conn: duckdb.DuckDBPyConnection,
+) -> None:
+    """
+    Final untouched evaluation period:
+        2026-01-01 through 2026-04-14
+
+    Historical features use only information available
+    before 2026:
+        2023-01-01 through 2025-12-31
+    """
+
+    columns_sql = sql_identifier_list(
+        source_columns
+    )
+
+    print("\nCreating DuckDB source tables...")
+
+    conn.execute(f"""
+        CREATE OR REPLACE TEMP TABLE
+            history_before_final AS
+
+        SELECT
+            {columns_sql}
+
+        FROM model_data_base
+
+        WHERE SEFER_TARIHI >= DATE '2023-01-01'
+          AND SEFER_TARIHI < DATE '2026-01-01'
+    """)
+
+    conn.execute(f"""
+        CREATE OR REPLACE TEMP TABLE
+            final_2026 AS
+
+        SELECT
+            {columns_sql}
+
+        FROM model_data_base
+
+        WHERE SEFER_TARIHI >= DATE '2026-01-01'
+          AND SEFER_TARIHI < DATE '2026-04-15'
+    """)
+
+
+def create_global_statistics_table(
+    conn: duckdb.DuckDBPyConnection,
+) -> None:
+    print("\nCreating global historical statistics...")
+
+    conn.execute("""
+        CREATE OR REPLACE TEMP TABLE
+            global_stats_final AS
+
+        SELECT
+            AVG(target)::DOUBLE
+                AS global_average,
+
+            MEDIAN(target)::DOUBLE
+                AS global_median,
+
+            STDDEV_SAMP(target)::DOUBLE
+                AS global_std,
+
+            MAX(target)::DOUBLE
+                AS global_maximum,
+
+            QUANTILE_CONT(target, 0.90)::DOUBLE
+                AS global_p90,
+
+            AVG(
+                CASE
+                    WHEN target > 60 THEN 1.0
+                    ELSE 0.0
+                END
+            )::DOUBLE
+                AS global_above_60_rate,
+
+            AVG(
+                CASE
+                    WHEN target > 100 THEN 1.0
+                    ELSE 0.0
+                END
+            )::DOUBLE
+                AS global_above_100_rate
+
+        FROM history_before_final
+    """)
+
+
+def create_group_statistics_table(
+    conn: duckdb.DuckDBPyConnection,
+    output_table: str,
+    prefix: str,
+    group_columns: list[str],
+) -> None:
+    group_columns_sql = sql_identifier_list(
+        group_columns
+    )
+
+    print(f"  Aggregating {prefix}")
+
+    conn.execute(f"""
+        CREATE OR REPLACE TEMP TABLE
+            {output_table} AS
+
+        SELECT
+            {group_columns_sql},
+
+            AVG(target)::DOUBLE
+                AS {prefix}_average,
+
+            MEDIAN(target)::DOUBLE
+                AS {prefix}_median,
+
+            STDDEV_SAMP(target)::DOUBLE
+                AS {prefix}_std,
+
+            MAX(target)::DOUBLE
+                AS {prefix}_maximum,
+
+            QUANTILE_CONT(target, 0.90)::DOUBLE
+                AS {prefix}_p90,
+
+            AVG(
+                CASE
+                    WHEN target > 60 THEN 1.0
+                    ELSE 0.0
+                END
+            )::DOUBLE
+                AS {prefix}_above_60_rate,
+
+            AVG(
+                CASE
+                    WHEN target > 100 THEN 1.0
+                    ELSE 0.0
+                END
+            )::DOUBLE
+                AS {prefix}_above_100_rate,
+
+            COUNT(*)::BIGINT
+                AS {prefix}_count
+
+        FROM history_before_final
+
+        GROUP BY
+            {group_columns_sql}
+    """)
+
+
+def create_all_statistics_tables(
+    conn: duckdb.DuckDBPyConnection,
+) -> None:
+    create_global_statistics_table(conn)
+
+    print("\nCreating grouped historical statistics...")
+
+    for prefix, group_columns in (
+        historical_group_definitions
+    ):
+        create_group_statistics_table(
+            conn=conn,
+            output_table=f"{prefix}_final",
+            prefix=prefix,
+            group_columns=group_columns,
+        )
+
+
+def build_join_condition(
+    base_alias: str,
+    aggregate_alias: str,
+    group_columns: list[str],
+) -> str:
+    return " AND ".join(
+        f"{base_alias}.{column} = "
+        f"{aggregate_alias}.{column}"
+        for column in group_columns
+    )
+
+
+def build_feature_expressions(
+    aggregate_alias: str,
+    prefix: str,
+) -> list[str]:
+    """
+    These fallback rules match the v3 training and
+    2025-H2 test files.
+    """
+
+    return [
+        (
+            f"COALESCE("
+            f"{aggregate_alias}.{prefix}_average, "
+            f"global_stats.global_average"
+            f") AS {prefix}_average"
+        ),
+        (
+            f"COALESCE("
+            f"{aggregate_alias}.{prefix}_median, "
+            f"global_stats.global_median"
+            f") AS {prefix}_median"
+        ),
+        (
+            f"COALESCE("
+            f"{aggregate_alias}.{prefix}_std, "
+            f"global_stats.global_std"
+            f") AS {prefix}_std"
+        ),
+        (
+            f"COALESCE("
+            f"{aggregate_alias}.{prefix}_maximum, "
+            f"global_stats.global_maximum"
+            f") AS {prefix}_maximum"
+        ),
+        (
+            f"COALESCE("
+            f"{aggregate_alias}.{prefix}_p90, "
+            f"global_stats.global_p90"
+            f") AS {prefix}_p90"
+        ),
+        (
+            f"COALESCE("
+            f"{aggregate_alias}.{prefix}_above_60_rate, "
+            f"global_stats.global_above_60_rate"
+            f") AS {prefix}_above_60_rate"
+        ),
+        (
+            f"COALESCE("
+            f"{aggregate_alias}.{prefix}_above_100_rate, "
+            f"global_stats.global_above_100_rate"
+            f") AS {prefix}_above_100_rate"
+        ),
+        (
+            f"COALESCE("
+            f"{aggregate_alias}.{prefix}_count, 0"
+            f")::BIGINT AS {prefix}_count"
+        ),
+    ]
+
+
+def create_final_feature_table(
+    conn: duckdb.DuckDBPyConnection,
+) -> None:
+    """
+    Join all v3 features and the weekday baseline onto
+    the untouched 2026 rows entirely inside DuckDB.
+    """
+
+    print("\nCreating complete DuckDB final feature table...")
+
+    select_expressions = [
+        "base.SEFER_TARIHI",
+        "base.FIRMA_ID",
+        "base.GUZERGAH_KODU",
+        "base.canonical_guzergah_id",
+        "base.target",
+        "base.month",
+        "base.week_of_year",
+        "base.day_of_week",
+        "base.departure_minute",
+        "base.departure_30min_bucket",
+    ]
+
+    joins = []
+    aggregate_aliases: dict[str, str] = {}
+
+    for index, (
+        prefix,
+        group_columns,
+    ) in enumerate(historical_group_definitions):
+        aggregate_alias = f"aggregate_{index}"
+        aggregate_aliases[prefix] = aggregate_alias
+
+        join_condition = build_join_condition(
+            base_alias="base",
+            aggregate_alias=aggregate_alias,
+            group_columns=group_columns,
+        )
+
+        joins.append(
+            f"""
+            LEFT JOIN {prefix}_final
+                AS {aggregate_alias}
+                ON {join_condition}
+            """
+        )
+
+        select_expressions.extend(
+            build_feature_expressions(
+                aggregate_alias=aggregate_alias,
+                prefix=prefix,
+            )
+        )
+
+    exact_alias = aggregate_aliases[
+        "company_route_time_weekday"
+    ]
+
+    canonical_time_alias = aggregate_aliases[
+        "canonical_route_time_weekday"
+    ]
+
+    canonical_route_alias = aggregate_aliases[
+        "canonical_route"
+    ]
+
+    # Same fair weekday baseline hierarchy used before:
+    # exact company-route-time-weekday
+    # -> canonical route-time-weekday
+    # -> canonical route
+    # -> overall historical average
+    select_expressions.append(
+        f"""
+        COALESCE(
+            {exact_alias}.
+                company_route_time_weekday_average,
+
+            {canonical_time_alias}.
+                canonical_route_time_weekday_average,
+
+            {canonical_route_alias}.
+                canonical_route_average,
+
+            global_stats.global_average
+        ) AS baseline_prediction
+        """
+    )
+
+    select_expressions.append(
+        f"""
+        CASE
+            WHEN {exact_alias}.
+                company_route_time_weekday_average
+                IS NOT NULL
+                THEN 'company_route_time_weekday'
+
+            WHEN {canonical_time_alias}.
+                canonical_route_time_weekday_average
+                IS NOT NULL
+                THEN 'canonical_route_time_weekday'
+
+            WHEN {canonical_route_alias}.
+                canonical_route_average
+                IS NOT NULL
+                THEN 'canonical_route'
+
+            ELSE 'overall_average'
+        END AS baseline_source
+        """
+    )
+
+    select_sql = ",\n            ".join(
+        select_expressions
+    )
+
+    joins_sql = "\n".join(joins)
+
+    conn.execute(f"""
+        CREATE OR REPLACE TEMP TABLE
+            final_features_v3 AS
+
+        SELECT
+            {select_sql}
+
+        FROM final_2026 AS base
+
+        CROSS JOIN global_stats_final
+            AS global_stats
+
+        {joins_sql}
+    """)
+
+
+def print_table_summary(
+    conn: duckdb.DuckDBPyConnection,
+    table_name: str,
+) -> None:
+    row_count, min_date, max_date = conn.execute(f"""
+        SELECT
+            COUNT(*),
+            MIN(SEFER_TARIHI),
+            MAX(SEFER_TARIHI)
+
+        FROM {table_name}
+    """).fetchone()
+
+    print(
+        f"{table_name}: {row_count:,} rows, "
+        f"{min_date} to {max_date}"
+    )
+
+
+# --------------------------------------------------
+# 4. Build final features in DuckDB
+# --------------------------------------------------
+
+print(f"Opening database: {DB_PATH}")
+
+conn = duckdb.connect(
+    str(DB_PATH),
+    read_only=False,
+)
+
+temp_directory_sql = (
+    TEMP_DIR
+    .as_posix()
+    .replace("'", "''")
+)
+
+conn.execute(
+    f"SET threads = {DUCKDB_THREADS}"
+)
+
+conn.execute(
+    f"SET temp_directory = "
+    f"'{temp_directory_sql}'"
+)
+
+
+create_source_tables(conn)
+
+print("\nSource summaries")
+
+print_table_summary(
+    conn,
+    "history_before_final",
+)
+
+print_table_summary(
+    conn,
+    "final_2026",
+)
+
+
+create_all_statistics_tables(conn)
+create_final_feature_table(conn)
+
+
+print("\nFinished feature-table summary")
+
+print_table_summary(
+    conn,
+    "final_features_v3",
+)
+
+
+# --------------------------------------------------
+# 5. Fetch only the completed final matrix
+# --------------------------------------------------
+
+columns_to_fetch = [
+    "SEFER_TARIHI",
+    *feature_columns,
+    "target",
+    "baseline_prediction",
+    "baseline_source",
+]
+
+columns_to_fetch_sql = sql_identifier_list(
+    columns_to_fetch
+)
+
+
+print("\nLoading completed final matrix into Pandas...")
+
+final_features_df = conn.execute(f"""
+    SELECT
+        {columns_to_fetch_sql}
+
+    FROM final_features_v3
+""").fetchdf()
+
+
+conn.close()
+
+
+print("\nLoaded final matrix")
+print("Final period:", final_features_df.shape)
+print("Feature count:", len(feature_columns))
+
+
+# --------------------------------------------------
+# 6. Prepare CatBoost final matrix
+# --------------------------------------------------
+
+for column in categorical_features:
+    final_features_df[column] = (
+        final_features_df[column]
+        .astype("string")
+        .fillna("missing")
+    )
+
+
+missing_values = (
+    final_features_df[feature_columns]
+    .isna()
+    .sum()
+)
+
+
+if missing_values.sum() > 0:
+    print("\nMissing final-period values")
+
+    print(
+        missing_values[
+            missing_values > 0
+        ].to_string()
+    )
+
+    raise ValueError(
+        "Final feature matrix contains "
+        "missing values."
+    )
+
+
+X_final = final_features_df[
+    feature_columns
+]
+
+y_final = final_features_df[
+    "target"
+]
+
+
+print("\nModel matrix")
+print("X_final:", X_final.shape)
+print("y_final:", y_final.shape)
+
+
+# --------------------------------------------------
+# 7. Load and validate selected v3 MAE model
+# --------------------------------------------------
+
+print(f"\nLoading model: {MODEL_PATH}")
+
+model = CatBoostRegressor()
+model.load_model(
+    str(MODEL_PATH)
+)
+
+
+model_feature_names = list(
+    model.feature_names_
+)
+
+
+if (
+    model_feature_names
+    and model_feature_names != feature_columns
+):
+    missing_from_final = [
+        feature
+        for feature in model_feature_names
+        if feature not in feature_columns
+    ]
+
+    extra_in_final = [
+        feature
+        for feature in feature_columns
+        if feature not in model_feature_names
+    ]
+
+    raise ValueError(
+        "Model feature columns do not match the "
+        "final feature columns.\n"
+        f"Missing from final: {missing_from_final}\n"
+        f"Extra in final: {extra_in_final}"
+    )
+
+
+# --------------------------------------------------
+# 8. Create final predictions
+# --------------------------------------------------
+
+print("Creating CatBoost v3 MAE final predictions...")
+
+catboost_predictions = model.predict(
+    X_final
+)
+
+baseline_predictions = final_features_df[
+    "baseline_prediction"
+].to_numpy()
+
+
+# --------------------------------------------------
+# 9. Calculate overall final metrics
+# --------------------------------------------------
+
+catboost_final_mae = mean_absolute_error(
+    y_final,
+    catboost_predictions,
+)
+
+catboost_final_rmse = mean_squared_error(
+    y_final,
+    catboost_predictions,
+) ** 0.5
+
+
+baseline_final_mae = mean_absolute_error(
+    y_final,
+    baseline_predictions,
+)
+
+baseline_final_rmse = mean_squared_error(
+    y_final,
+    baseline_predictions,
+) ** 0.5
+
+
+mae_improvement = (
+    baseline_final_mae - catboost_final_mae
+)
+
+rmse_improvement = (
+    baseline_final_rmse - catboost_final_rmse
+)
+
+mae_improvement_percentage = (
+    mae_improvement
+    / baseline_final_mae
+) * 100
+
+
+print("\nCatBoost v3 MAE final results")
+print("Final MAE:", catboost_final_mae)
+print("Final RMSE:", catboost_final_rmse)
+
+
+print("\nWeekday baseline final results")
+print("Final MAE:", baseline_final_mae)
+print("Final RMSE:", baseline_final_rmse)
+
+
+print("\nComparison against final-period baseline")
+
+print("Baseline final MAE:", baseline_final_mae)
+print("CatBoost v3 final MAE:", catboost_final_mae)
+print("MAE improvement:", mae_improvement)
+
+print(
+    "MAE improvement percentage:",
+    mae_improvement_percentage,
+)
+
+print("\nBaseline final RMSE:", baseline_final_rmse)
+print("CatBoost v3 final RMSE:", catboost_final_rmse)
+print("RMSE improvement:", rmse_improvement)
+
+
+# --------------------------------------------------
+# 10. Baseline fallback usage
+# --------------------------------------------------
+
+baseline_source_percentages = (
+    final_features_df["baseline_source"]
+    .value_counts(normalize=True)
+    .mul(100)
+)
+
+
+print("\nBaseline prediction source percentages")
+print(baseline_source_percentages.to_string())
+
+
+# --------------------------------------------------
+# 11. Build results table
+# --------------------------------------------------
+
+results_df = pd.DataFrame({
+    "date":
+        final_features_df[
+            "SEFER_TARIHI"
+        ].to_numpy(),
+
+    "actual":
+        y_final.to_numpy(),
+
+    "catboost_prediction":
+        catboost_predictions,
+
+    "baseline_prediction":
+        baseline_predictions,
+})
+
+
+results_df["catboost_absolute_error"] = (
+    results_df["actual"]
+    - results_df["catboost_prediction"]
+).abs()
+
+results_df["baseline_absolute_error"] = (
+    results_df["actual"]
+    - results_df["baseline_prediction"]
+).abs()
+
+results_df["catboost_squared_error"] = (
+    results_df["actual"]
+    - results_df["catboost_prediction"]
+) ** 2
+
+results_df["baseline_squared_error"] = (
+    results_df["actual"]
+    - results_df["baseline_prediction"]
+) ** 2
+
+
+# --------------------------------------------------
+# 12. Absolute-error percentiles
+# --------------------------------------------------
+
+print("\nAbsolute-error percentiles")
+
+for percentile in [
+    0.50,
+    0.75,
+    0.90,
+    0.95,
+    0.99,
+]:
+    catboost_error = (
+        results_df[
+            "catboost_absolute_error"
+        ]
+        .quantile(percentile)
+    )
+
+    baseline_error = (
+        results_df[
+            "baseline_absolute_error"
+        ]
+        .quantile(percentile)
+    )
+
+    print(
+        f"{percentile:>5.0%} percentile | "
+        f"CatBoost: {catboost_error:.3f} | "
+        f"Baseline: {baseline_error:.3f}"
+    )
+
+
+# --------------------------------------------------
+# 13. Monthly analysis
+# --------------------------------------------------
+
+results_df["month"] = (
+    pd.to_datetime(
+        results_df["date"]
+    ).dt.month
+)
+
+
+monthly_results = (
+    results_df
+    .groupby("month")
+    .agg(
+        row_count=(
+            "actual",
+            "size",
+        ),
+
+        average_actual=(
+            "actual",
+            "mean",
+        ),
+
+        average_catboost_prediction=(
+            "catboost_prediction",
+            "mean",
+        ),
+
+        average_baseline_prediction=(
+            "baseline_prediction",
+            "mean",
+        ),
+
+        catboost_mae=(
+            "catboost_absolute_error",
+            "mean",
+        ),
+
+        baseline_mae=(
+            "baseline_absolute_error",
+            "mean",
+        ),
+
+        catboost_mean_squared_error=(
+            "catboost_squared_error",
+            "mean",
+        ),
+
+        baseline_mean_squared_error=(
+            "baseline_squared_error",
+            "mean",
+        ),
+    )
+)
+
+
+monthly_results["catboost_rmse"] = (
+    monthly_results[
+        "catboost_mean_squared_error"
+    ] ** 0.5
+)
+
+monthly_results["baseline_rmse"] = (
+    monthly_results[
+        "baseline_mean_squared_error"
+    ] ** 0.5
+)
+
+monthly_results["mae_improvement"] = (
+    monthly_results["baseline_mae"]
+    - monthly_results["catboost_mae"]
+)
+
+monthly_results["catboost_bias"] = (
+    monthly_results[
+        "average_catboost_prediction"
+    ]
+    - monthly_results["average_actual"]
+)
+
+monthly_results["baseline_bias"] = (
+    monthly_results[
+        "average_baseline_prediction"
+    ]
+    - monthly_results["average_actual"]
+)
+
+monthly_results = monthly_results.drop(
+    columns=[
+        "catboost_mean_squared_error",
+        "baseline_mean_squared_error",
+    ]
+)
+
+
+print("\nMonthly final-period results")
+print(monthly_results.to_string())
+
+
+monthly_results.to_csv(
+    "results/catboost_v3_mae_final_monthly_results.csv"
+)
+
+
+# --------------------------------------------------
+# 14. Passenger-count group analysis
+# --------------------------------------------------
+
+results_df["target_group"] = pd.cut(
+    results_df["actual"],
+    bins=[
+        0,
+        10,
+        20,
+        30,
+        40,
+        60,
+        100,
+        300,
+    ],
+    labels=[
+        "1-10",
+        "11-20",
+        "21-30",
+        "31-40",
+        "41-60",
+        "61-100",
+        "101-300",
+    ],
+)
+
+
+target_group_results = (
+    results_df
+    .groupby(
+        "target_group",
+        observed=True,
+    )
+    .agg(
+        row_count=(
+            "actual",
+            "size",
+        ),
+
+        average_actual=(
+            "actual",
+            "mean",
+        ),
+
+        average_catboost_prediction=(
+            "catboost_prediction",
+            "mean",
+        ),
+
+        average_baseline_prediction=(
+            "baseline_prediction",
+            "mean",
+        ),
+
+        catboost_mae=(
+            "catboost_absolute_error",
+            "mean",
+        ),
+
+        baseline_mae=(
+            "baseline_absolute_error",
+            "mean",
+        ),
+
+        catboost_mean_squared_error=(
+            "catboost_squared_error",
+            "mean",
+        ),
+
+        baseline_mean_squared_error=(
+            "baseline_squared_error",
+            "mean",
+        ),
+    )
+)
+
+
+target_group_results["catboost_rmse"] = (
+    target_group_results[
+        "catboost_mean_squared_error"
+    ] ** 0.5
+)
+
+target_group_results["baseline_rmse"] = (
+    target_group_results[
+        "baseline_mean_squared_error"
+    ] ** 0.5
+)
+
+target_group_results["mae_improvement"] = (
+    target_group_results["baseline_mae"]
+    - target_group_results["catboost_mae"]
+)
+
+target_group_results["catboost_bias"] = (
+    target_group_results[
+        "average_catboost_prediction"
+    ]
+    - target_group_results["average_actual"]
+)
+
+target_group_results["baseline_bias"] = (
+    target_group_results[
+        "average_baseline_prediction"
+    ]
+    - target_group_results["average_actual"]
+)
+
+target_group_results = target_group_results.drop(
+    columns=[
+        "catboost_mean_squared_error",
+        "baseline_mean_squared_error",
+    ]
+)
+
+
+print(
+    "\nPrediction results by passenger-count group"
+)
+
+print(
+    target_group_results.to_string()
+)
+
+
+target_group_results.to_csv(
+    "results/catboost_v3_mae_final_target_groups.csv"
+)
+
+
+# --------------------------------------------------
+# 15. Save row-level predictions
+# --------------------------------------------------
+
+results_df.to_csv(
+    "results/catboost_v3_mae_final_predictions.csv",
+    index=False,
+)
+
+
+# --------------------------------------------------
+# 16. Final summary
+# --------------------------------------------------
+
+print("\nUntouched final-period summary")
+
+print(
+    f"CatBoost v3 MAE: "
+    f"{catboost_final_mae:.6f}"
+)
+
+print(
+    f"CatBoost v3 RMSE: "
+    f"{catboost_final_rmse:.6f}"
+)
+
+print(
+    f"Baseline MAE: "
+    f"{baseline_final_mae:.6f}"
+)
+
+print(
+    f"Baseline RMSE: "
+    f"{baseline_final_rmse:.6f}"
+)
+
+print(
+    f"MAE improvement over baseline: "
+    f"{mae_improvement_percentage:.3f}%"
+)
+
+print(
+    f"RMSE improvement over baseline: "
+    f"{rmse_improvement:.6f}"
+)

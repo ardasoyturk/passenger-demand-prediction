@@ -1,0 +1,26 @@
+{
+  "name": "training",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "frontend": "vite",
+    "frontend:build": "vite build",
+    "frontend:preview": "vite preview",
+    "backend": "uv run uvicorn inference.api.app:app --reload --host 0.0.0.0 --port 8000"
+  },
+  "dependencies": {
+    "@preact/signals": "^2.0.5",
+    "leaflet": "^1.9.4",
+    "lucide-preact": "^1.25.0",
+    "preact": "^10.26.9"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.2",
+    "@tailwindcss/vite": "^4.1.11",
+    "@types/bun": "latest",
+    "@types/leaflet": "^1.9.21",
+    "tailwindcss": "^4.1.11",
+    "typescript": "^5",
+    "vite": "^7.0.4"
+  }
+}
