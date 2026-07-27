@@ -112,7 +112,7 @@ def ensure_environment(require_rule: bool = False) -> None:
     if require_rule and not RULE_PATH.exists():
         raise FileNotFoundError(
             f"Frozen v4.2 rule not found: {RULE_PATH}. "
-            "Run catboost_v4_2_hybrid_validation.py first."
+            "Run scripts/catboost/v4_2/validation.py first."
         )
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     v4_1.TEMP_DIR.mkdir(parents=True, exist_ok=True)

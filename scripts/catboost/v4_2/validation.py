@@ -1,3 +1,8 @@
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+
 from scripts.catboost.v4_2.common import PeriodConfig, run_validation
 
 

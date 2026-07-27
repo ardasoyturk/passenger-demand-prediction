@@ -36,6 +36,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path = [
+    entry
+    for entry in sys.path
+    if Path(entry or ".").resolve() != SCRIPT_DIR
+]
 sys.path.insert(0, str(PROJECT_DIR))
 from inference import engine
 

@@ -7,6 +7,11 @@ This script must be launched manually; importing it does not run training.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+
 import pandas as pd
 from catboost import CatBoostRegressor
 
@@ -87,4 +92,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -1,8 +1,8 @@
 r"""One-period evaluation for the frozen CatBoost v4.3 experiment.
 
 Usage:
-    uv run .\scripts\catboost_v4_3_evaluate.py test
-    uv run .\scripts\catboost_v4_3_evaluate.py final
+    uv run python scripts/catboost/v4_3/evaluate.py test
+    uv run python scripts/catboost/v4_3/evaluate.py final
 
 The final period is reporting-only because it has already been observed.
 Existing outputs are never overwritten, making the test run one-shot per
@@ -12,7 +12,10 @@ frozen model artifact.
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from scripts.catboost.v4_3 import common
 
