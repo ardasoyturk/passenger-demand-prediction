@@ -18,17 +18,80 @@ import pandas as pd
 from catboost import CatBoostClassifier
 from sklearn.metrics import average_precision_score, log_loss, roc_auc_score
 
-PROJECT_DIR = Path(__file__).resolve().parents[3]
-import sys
-sys.path.insert(0, str(PROJECT_DIR))
-from scripts.catboost.v4_3 import common as features
-DB_PATH = PROJECT_DIR / "analysis.duckdb"
-MODELS_DIR = PROJECT_DIR / "models"
-RESULTS_DIR = PROJECT_DIR / "results"
+from scripts.shared.constants import (
+    CATEGORICAL_FEATURES,
+    CALENDAR_NUMERIC_FEATURES,
+    HISTORICAL_FEATURES,
+    RECENT_FEATURES,
+    SOURCE_COLUMNS,
+    V4_1_FEATURE_COLUMNS,
+)
+from scripts.shared.feature_pipeline import (
+    connect,
+    create_long_term_statistics,
+    create_recent_statistics,
+    create_source_tables,
+    sql_identifier_list,
+    validate_feature_frame as _shared_validate_feature_frame,
+)
+from scripts.shared.metrics import classification_metrics as shared_classification_metrics
+from scripts.shared.paths import DB_PATH, MODELS_DIR, RESULTS_DIR
+from scripts.shared.period_config import PeriodConfig, STANDARD_PERIODS
+
+# v4.3 distribution features (same as v4_3/common.py)
+DISTRIBUTION_PREFIX = "company_route_time_weekday"
+NEW_DISTRIBUTION_SUFFIXES = [
+    "p10", "p25", "p75",
+    "below_10_rate", "above_10_rate", "above_20_rate",
+    "above_30_rate", "above_40_rate",
+]
+NEW_DISTRIBUTION_FEATURES = [
+    f"{DISTRIBUTION_PREFIX}_{suffix}" for suffix in NEW_DISTRIBUTION_SUFFIXES
+]
+FEATURE_COLUMNS = list(V4_1_FEATURE_COLUMNS) + NEW_DISTRIBUTION_FEATURES
+
+# v4.3 distribution extra SQL
+_EXTRA_GLOBAL_SQL = """
+    QUANTILE_CONT(target, 0.10)::DOUBLE AS global_p10,
+    QUANTILE_CONT(target, 0.25)::DOUBLE AS global_p25,
+    QUANTILE_CONT(target, 0.75)::DOUBLE AS global_p75,
+    AVG(CASE WHEN target < 10 THEN 1.0 ELSE 0.0 END)::DOUBLE
+        AS global_below_10_rate,
+    AVG(CASE WHEN target > 10 THEN 1.0 ELSE 0.0 END)::DOUBLE
+        AS global_above_10_rate,
+    AVG(CASE WHEN target > 20 THEN 1.0 ELSE 0.0 END)::DOUBLE
+        AS global_above_20_rate,
+    AVG(CASE WHEN target > 30 THEN 1.0 ELSE 0.0 END)::DOUBLE
+        AS global_above_30_rate,
+    AVG(CASE WHEN target > 40 THEN 1.0 ELSE 0.0 END)::DOUBLE
+        AS global_above_40_rate
+""".strip()
+
+_EXTRA_GROUP_SQL = """
+    QUANTILE_CONT(target, 0.10)::DOUBLE
+        AS company_route_time_weekday_p10,
+    QUANTILE_CONT(target, 0.25)::DOUBLE
+        AS company_route_time_weekday_p25,
+    QUANTILE_CONT(target, 0.75)::DOUBLE
+        AS company_route_time_weekday_p75,
+    AVG(CASE WHEN target < 10 THEN 1.0 ELSE 0.0 END)::DOUBLE
+        AS company_route_time_weekday_below_10_rate,
+    AVG(CASE WHEN target > 10 THEN 1.0 ELSE 0.0 END)::DOUBLE
+        AS company_route_time_weekday_above_10_rate,
+    AVG(CASE WHEN target > 20 THEN 1.0 ELSE 0.0 END)::DOUBLE
+        AS company_route_time_weekday_above_20_rate,
+    AVG(CASE WHEN target > 30 THEN 1.0 ELSE 0.0 END)::DOUBLE
+        AS company_route_time_weekday_above_30_rate,
+    AVG(CASE WHEN target > 40 THEN 1.0 ELSE 0.0 END)::DOUBLE
+        AS company_route_time_weekday_above_40_rate
+""".strip()
+
+EXTRA_GROUP_SQLS = {DISTRIBUTION_PREFIX: _EXTRA_GROUP_SQL}
+
 DEFAULT_THRESHOLDS = (10, 20, 30, 43)
 TARGET_NAMES = {threshold: f"target_ge_{threshold}" for threshold in DEFAULT_THRESHOLDS}
 
-TRAIN_CONFIG = features.PeriodConfig(
+TRAIN_CONFIG = PeriodConfig(
     "train_2024",
     "2024 leakage-safe supervised training",
     "2023-01-01",
@@ -39,9 +102,9 @@ TRAIN_CONFIG = features.PeriodConfig(
     False,
 )
 PERIODS = {
-    "validation": features.PERIODS["validation"],
-    "test": features.PERIODS["test"],
-    "final": features.PeriodConfig(
+    "validation": STANDARD_PERIODS["validation"],
+    "test": STANDARD_PERIODS["test"],
+    "final": PeriodConfig(
         "final_2026",
         "2026 final reporting (through 2026-04-30; data currently ends 2026-04-14)",
         "2023-01-01",
@@ -142,7 +205,7 @@ def ensure_directories() -> None:
 def validate_database_schema() -> list[str]:
     if not DB_PATH.exists():
         raise FileNotFoundError(f"Database not found: {DB_PATH}")
-    required = set(features.SOURCE_COLUMNS)
+    required = set(SOURCE_COLUMNS)
     conn = duckdb.connect(str(DB_PATH), read_only=True)
     try:
         tables = {row[0] for row in conn.execute("SHOW TABLES").fetchall()}
@@ -154,7 +217,7 @@ def validate_database_schema() -> list[str]:
     missing = sorted(required - set(columns))
     if missing:
         raise RuntimeError(f"model_data_base is missing required columns: {missing}")
-    if len(features.FEATURE_COLUMNS) != 72 or len(set(features.FEATURE_COLUMNS)) != 72:
+    if len(FEATURE_COLUMNS) != 72 or len(set(FEATURE_COLUMNS)) != 72:
         raise RuntimeError("Expected exactly 72 unique v4.3 feature columns")
     return columns
 
@@ -193,11 +256,11 @@ def inspect_split_counts() -> tuple[pd.DataFrame, pd.DataFrame]:
     return splits, distributions
 
 
-def build_feature_matrix(config: features.PeriodConfig, *, training: bool) -> pd.DataFrame:
-    """Build one matrix through the shared v4.3 SQL, without model inference."""
-    conn = features.connect()
+def build_feature_matrix(config: PeriodConfig, *, training: bool) -> pd.DataFrame:
+    """Build one matrix through the shared v4.3-compatible SQL, without model inference."""
+    conn = connect()
     try:
-        features.create_source_tables(conn, config, training=training)
+        create_source_tables(conn, config, table_prefix="v4_3")
         recent_history_table = "v4_3_history"
         if training:
             conn.execute("""
@@ -207,24 +270,105 @@ def build_feature_matrix(config: features.PeriodConfig, *, training: bool) -> pd
                 SELECT * FROM v4_3_target
             """)
             recent_history_table = "v4_3_recent_history"
-        features.create_long_term_statistics(conn)
-        features.create_recent_statistics(conn, config, history_table=recent_history_table)
-        features.create_feature_table(conn)
+        create_long_term_statistics(
+            conn,
+            table_prefix="v4_3",
+            extra_global_sql=_EXTRA_GLOBAL_SQL,
+            extra_group_sqls=EXTRA_GROUP_SQLS,
+        )
+        create_recent_statistics(
+            conn, config, table_prefix="v4_3", history_table=recent_history_table,
+        )
+        # Build feature table with distribution extensions (same as v4_3)
+        _build_v4_3_feature_table(conn)
         columns = [
             "SEFER_ID", "SEFER_TARIHI", "FIRMA_ID", "GUZERGAH_KODU",
-            *features.FEATURE_COLUMNS, "target", "baseline_prediction", "baseline_source",
+            *FEATURE_COLUMNS, "target", "baseline_prediction", "baseline_source",
         ]
-        # Keep the requested identifiers once even though some are also model features.
         columns = list(dict.fromkeys(columns))
         frame = conn.execute(
-            f"SELECT {features.sql_identifier_list(columns)} FROM v4_3_features"
+            f"SELECT {sql_identifier_list(columns)} FROM v4_3_features"
         ).fetchdf()
     finally:
         conn.close()
-    features.validate_feature_frame(frame)
+    _shared_validate_feature_frame(frame, feature_columns=FEATURE_COLUMNS)
     if len(frame) != config.expected_rows:
         raise RuntimeError(f"Expected {config.expected_rows:,} {config.key} rows; found {len(frame):,}")
     return frame
+
+
+def _build_v4_3_feature_table(conn: duckdb.DuckDBPyConnection) -> None:
+    """Assemble feature table with distribution extensions (same logic as v4_3)."""
+    from scripts.shared.constants import HISTORICAL_GROUP_DEFINITIONS, RECENT_GROUP_DEFINITIONS, RECENT_WINDOWS
+    from scripts.shared.feature_pipeline import long_term_expressions, join_condition
+
+    select_expressions = [
+        "base.SEFER_ID", "base.SEFER_TARIHI", "base.FIRMA_ID",
+        "base.GUZERGAH_KODU", "base.canonical_guzergah_id", "base.target",
+        "base.month", "base.week_of_year", "base.day_of_week",
+        "base.departure_minute", "base.departure_30min_bucket",
+    ]
+    joins: list[str] = []
+    aliases: dict[str, str] = {}
+
+    for index, (prefix, group_columns) in enumerate(HISTORICAL_GROUP_DEFINITIONS):
+        alias = f"long_term_{index}"
+        aliases[prefix] = alias
+        joins.append(
+            f"LEFT JOIN v4_3_{prefix}_stats AS {alias} "
+            f"ON {join_condition('base', alias, group_columns)}"
+        )
+        select_expressions.extend(long_term_expressions(alias, prefix))
+        if prefix == DISTRIBUTION_PREFIX:
+            select_expressions.extend([
+                f"COALESCE({alias}.{prefix}_p10, global_stats.global_p10) AS {prefix}_p10",
+                f"COALESCE({alias}.{prefix}_p25, global_stats.global_p25) AS {prefix}_p25",
+                f"COALESCE({alias}.{prefix}_p75, global_stats.global_p75) AS {prefix}_p75",
+                f"COALESCE({alias}.{prefix}_below_10_rate, global_stats.global_below_10_rate) AS {prefix}_below_10_rate",
+                f"COALESCE({alias}.{prefix}_above_10_rate, global_stats.global_above_10_rate) AS {prefix}_above_10_rate",
+                f"COALESCE({alias}.{prefix}_above_20_rate, global_stats.global_above_20_rate) AS {prefix}_above_20_rate",
+                f"COALESCE({alias}.{prefix}_above_30_rate, global_stats.global_above_30_rate) AS {prefix}_above_30_rate",
+                f"COALESCE({alias}.{prefix}_above_40_rate, global_stats.global_above_40_rate) AS {prefix}_above_40_rate",
+            ])
+
+    recent_index = len(HISTORICAL_GROUP_DEFINITIONS)
+    for prefix, group_columns in RECENT_GROUP_DEFINITIONS:
+        fallback = f"COALESCE({aliases[prefix]}.{prefix}_average, global_stats.global_average)"
+        for window in RECENT_WINDOWS:
+            alias = f"recent_{recent_index}"
+            join = join_condition("base", alias, group_columns)
+            join += f" AND base.SEFER_TARIHI = {alias}.reference_date"
+            joins.append(
+                f"LEFT JOIN v4_3_{prefix}_recent_{window}d_stats AS {alias} ON {join}"
+            )
+            select_expressions.extend([
+                f"COALESCE({alias}.{prefix}_recent_{window}d_average, {fallback}) AS {prefix}_recent_{window}d_average",
+                f"COALESCE({alias}.{prefix}_recent_{window}d_count, 0)::BIGINT AS {prefix}_recent_{window}d_count",
+            ])
+            recent_index += 1
+
+    specific = aliases["company_route_time_weekday"]
+    canonical_time = aliases["canonical_route_time_weekday"]
+    canonical = aliases["canonical_route"]
+    select_expressions.extend([
+        f"COALESCE({specific}.company_route_time_weekday_average, "
+        f"{canonical_time}.canonical_route_time_weekday_average, "
+        f"{canonical}.canonical_route_average, global_stats.global_average) AS baseline_prediction",
+        f"CASE WHEN {specific}.company_route_time_weekday_average IS NOT NULL "
+        "THEN 'company_route_time_weekday' "
+        f"WHEN {canonical_time}.canonical_route_time_weekday_average IS NOT NULL "
+        "THEN 'canonical_route_time_weekday' "
+        f"WHEN {canonical}.canonical_route_average IS NOT NULL "
+        "THEN 'canonical_route' ELSE 'overall_average' END AS baseline_source",
+    ])
+
+    conn.execute(f"""
+        CREATE OR REPLACE TEMP TABLE v4_3_features AS
+        SELECT {', '.join(select_expressions)}
+        FROM v4_3_target AS base
+        CROSS JOIN v4_3_global_stats AS global_stats
+        {' '.join(joins)}
+    """)
 
 
 def class_distribution(actual: Iterable[int], threshold: int) -> dict[str, Any]:
@@ -239,41 +383,8 @@ def class_distribution(actual: Iterable[int], threshold: int) -> dict[str, Any]:
     }
 
 
-def _safe_divide(numerator: int, denominator: int) -> float:
-    return float(numerator / denominator) if denominator else 0.0
-
-
 def classification_metrics(actual_label: Iterable[int], predicted_label: Iterable[int]) -> dict[str, Any]:
-    actual = np.asarray(actual_label, dtype=np.int8)
-    predicted = np.asarray(predicted_label, dtype=np.int8)
-    if actual.shape != predicted.shape or actual.ndim != 1:
-        raise ValueError("Actual and predicted labels must be aligned one-dimensional arrays")
-    tp = int(np.sum((actual == 1) & (predicted == 1)))
-    tn = int(np.sum((actual == 0) & (predicted == 0)))
-    fp = int(np.sum((actual == 0) & (predicted == 1)))
-    fn = int(np.sum((actual == 1) & (predicted == 0)))
-    precision = _safe_divide(tp, tp + fp)
-    recall = _safe_divide(tp, tp + fn)
-    specificity = _safe_divide(tn, tn + fp)
-    return {
-        "row_count": len(actual),
-        "actual_positive_count": int(actual.sum()),
-        "actual_negative_count": int(len(actual) - actual.sum()),
-        "actual_positive_rate": float(actual.mean()),
-        "true_positive": tp,
-        "true_negative": tn,
-        "false_positive": fp,
-        "false_negative": fn,
-        "accuracy": _safe_divide(tp + tn, len(actual)),
-        "balanced_accuracy": (recall + specificity) / 2.0,
-        "precision": precision,
-        "recall": recall,
-        "specificity": specificity,
-        "f1": _safe_divide(2 * tp, 2 * tp + fp + fn),
-        "false_positive_rate": _safe_divide(fp, fp + tn),
-        "false_negative_rate": _safe_divide(fn, fn + tp),
-        "predicted_positive_rate": float(predicted.mean()),
-    }
+    return shared_classification_metrics(actual_label, predicted_label)
 
 
 def probability_metrics(actual_label: Iterable[int], probability: Iterable[float]) -> dict[str, float]:
@@ -393,14 +504,14 @@ def load_classifier_and_metadata(
         raise RuntimeError(f"Metadata threshold mismatch in {metadata_file}")
     if metadata.get("class_weight_mode") != class_weight_mode:
         raise RuntimeError(f"Class-weight mode mismatch in {metadata_file}")
-    if metadata.get("feature_names") != features.FEATURE_COLUMNS:
+    if metadata.get("feature_names") != FEATURE_COLUMNS:
         raise RuntimeError(f"Metadata feature contract mismatch in {metadata_file}")
     cutoff = metadata.get("frozen_probability_cutoff")
     if cutoff is None or not 0.05 <= float(cutoff) <= 0.95:
         raise RuntimeError(f"Invalid frozen cutoff in {metadata_file}")
     model = CatBoostClassifier()
     model.load_model(str(model_file))
-    if list(model.feature_names_) != features.FEATURE_COLUMNS:
+    if list(model.feature_names_) != FEATURE_COLUMNS:
         raise RuntimeError(f"Model feature contract mismatch in {model_file}")
     return model, metadata
 
@@ -486,7 +597,7 @@ def run_frozen_evaluation(
     summaries = []
     for threshold, (model, metadata) in loaded.items():
         cutoff = float(metadata["frozen_probability_cutoff"])
-        probability = model.predict_proba(frame[features.FEATURE_COLUMNS])[:, 1]
+        probability = model.predict_proba(frame[FEATURE_COLUMNS])[:, 1]
         actual = (frame["target"].to_numpy() >= threshold).astype(np.int8)
         metric_frames.append(metric_rows(frame, probability, cutoff, threshold, period))
         prediction_frames.append(prediction_rows(frame, probability, cutoff, threshold))

@@ -19,7 +19,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from scripts.catboost.v4_4 import common
-from scripts.catboost.v4_3 import common as feature_pipeline
+from scripts.shared.constants import CATEGORICAL_FEATURES
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -82,7 +82,7 @@ def run_dry_run(args: argparse.Namespace) -> None:
     print("v4.4 DRY RUN — no feature matrices or CatBoost pools will be created")
     print(f"Database: {common.DB_PATH}")
     print(f"model_data_base columns validated: {len(columns)}")
-    print(f"Feature schema: {len(feature_pipeline.FEATURE_COLUMNS)} unique v4.3 features")
+    print(f"Feature schema: {len(common.FEATURE_COLUMNS)} unique v4.3 features")
     print("Nominal training source: 2023-01-01 through 2024-12-31")
     print("Effective supervised rows: 2024-01-01 through 2024-12-31; 2023 is leakage-safe history")
     print("\nSplit row counts")
@@ -136,8 +136,8 @@ def main() -> None:
     validation = common.build_feature_matrix(common.PERIODS["validation"], training=False)
     validation = common.merge_comparison_predictions(validation, "validation")
 
-    x_train = train[feature_pipeline.FEATURE_COLUMNS]
-    x_validation = validation[feature_pipeline.FEATURE_COLUMNS]
+    x_train = train[common.FEATURE_COLUMNS]
+    x_validation = validation[common.FEATURE_COLUMNS]
     metric_frames = []
     prediction_frames = []
     calibration_frames = []
@@ -156,12 +156,12 @@ def main() -> None:
         model.fit(
             x_train,
             y_train,
-            cat_features=feature_pipeline.CATEGORICAL_FEATURES,
+            cat_features=CATEGORICAL_FEATURES,
             eval_set=(x_validation, y_validation),
             early_stopping_rounds=args.early_stopping_rounds,
             use_best_model=True,
         )
-        if list(model.feature_names_) != feature_pipeline.FEATURE_COLUMNS:
+        if list(model.feature_names_) != common.FEATURE_COLUMNS:
             raise RuntimeError("Trained classifier feature names/order changed unexpectedly")
 
         probability = model.predict_proba(x_validation)[:, 1]
@@ -188,9 +188,9 @@ def main() -> None:
             "purpose": "passenger_demand_threshold_probability",
             "threshold": threshold,
             "target_name": label_name,
-            "feature_count": len(feature_pipeline.FEATURE_COLUMNS),
-            "feature_names": feature_pipeline.FEATURE_COLUMNS,
-            "categorical_feature_names": feature_pipeline.CATEGORICAL_FEATURES,
+            "feature_count": len(common.FEATURE_COLUMNS),
+            "feature_names": common.FEATURE_COLUMNS,
+            "categorical_feature_names": CATEGORICAL_FEATURES,
             "nominal_training_date_range": {
                 "start": "2023-01-01", "end_exclusive": "2025-01-01"
             },

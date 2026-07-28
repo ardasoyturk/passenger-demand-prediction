@@ -6,30 +6,37 @@ import json
 from pathlib import Path
 from typing import Any
 
-import duckdb
 import numpy as np
 import pandas as pd
-from catboost import CatBoostRegressor
 
-PROJECT_DIR = Path(__file__).resolve().parents[3]
-import sys
-sys.path.insert(0, str(PROJECT_DIR))
-from scripts.catboost.v4_1 import common as v4_1
-RESULTS_DIR = PROJECT_DIR / "results"
-V3_MODEL_PATH = (
-    PROJECT_DIR / "models" / "catboost_demand_model_v3_mae_6000.cbm"
+from scripts.shared.constants import (
+    CATEGORICAL_FEATURES,
+    CALENDAR_NUMERIC_FEATURES,
+    HISTORICAL_FEATURES,
+    V4_1_FEATURE_COLUMNS,
 )
-V4_1_MODEL_PATH = (
-    PROJECT_DIR
-    / "models"
-    / "catboost_demand_model_v4_1_recent_mae_6000.cbm"
+from scripts.shared.feature_pipeline import (
+    connect,
+    create_feature_table,
+    create_long_term_statistics,
+    create_recent_statistics,
+    create_source_tables,
+    ensure_environment,
+    sql_identifier_list,
+    validate_feature_frame,
 )
+from scripts.shared.metrics import regression_metrics
+from scripts.shared.model_utils import load_catboost_regressor
+from scripts.shared.paths import DB_PATH, DUCKDB_THREADS, MODELS_DIR, RESULTS_DIR, TEMP_DIR
+
+V3_MODEL_PATH = MODELS_DIR / "catboost_demand_model_v3_mae_6000.cbm"
+V4_1_MODEL_PATH = MODELS_DIR / "catboost_demand_model_v4_1_recent_mae_6000.cbm"
 RULE_PATH = RESULTS_DIR / "catboost_v4_2_hybrid_rule.json"
 
 V3_FEATURE_COLUMNS = (
-    v4_1.CATEGORICAL_FEATURES
-    + v4_1.CALENDAR_NUMERIC_FEATURES
-    + v4_1.HISTORICAL_FEATURES
+    CATEGORICAL_FEATURES
+    + CALENDAR_NUMERIC_FEATURES
+    + HISTORICAL_FEATURES
 )
 
 SIGNAL_PREFIX = "company_route_time_weekday"
@@ -50,13 +57,7 @@ METRIC_EQUALITY_TOLERANCE = 1e-6
 
 TARGET_GROUP_BINS = [0, 10, 20, 30, 40, 60, 100, 300]
 TARGET_GROUP_LABELS = [
-    "1-10",
-    "11-20",
-    "21-30",
-    "31-40",
-    "41-60",
-    "61-100",
-    "101-300",
+    "1-10", "11-20", "21-30", "31-40", "41-60", "61-100", "101-300",
 ]
 
 
@@ -82,60 +83,22 @@ class HybridRule:
     strong_weight: float
 
 
-def _metric_values(actual: np.ndarray, prediction: np.ndarray) -> dict[str, float]:
-    error = prediction - actual
-    return {
-        "mae": float(np.mean(np.abs(error))),
-        "rmse": float(np.sqrt(np.mean(np.square(error)))),
-        "bias": float(np.mean(error)),
-    }
-
-
-def _load_model(path: Path, expected_features: list[str]) -> CatBoostRegressor:
-    if not path.exists():
-        raise FileNotFoundError(f"Frozen model not found: {path}")
-
-    model = CatBoostRegressor()
-    model.load_model(str(path))
-    saved_features = list(model.feature_names_)
-    if saved_features != expected_features:
-        raise RuntimeError(
-            f"Feature contract mismatch for {path.name}.\n"
-            f"Saved: {saved_features}\nExpected: {expected_features}"
-        )
-    return model
-
-
-def ensure_environment(require_rule: bool = False) -> None:
-    if not v4_1.DB_PATH.exists():
-        raise FileNotFoundError(f"Database not found: {v4_1.DB_PATH}")
+def _ensure_environment(require_rule: bool = False) -> None:
+    ensure_environment()
     if require_rule and not RULE_PATH.exists():
         raise FileNotFoundError(
             f"Frozen v4.2 rule not found: {RULE_PATH}. "
             "Run scripts/catboost/v4_2/validation.py first."
         )
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    v4_1.TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def build_prediction_frame(config: PeriodConfig) -> pd.DataFrame:
     """Build leakage-safe v3/v4.1 features in DuckDB, then predict."""
 
-    ensure_environment()
-    v3_model = _load_model(V3_MODEL_PATH, V3_FEATURE_COLUMNS)
-    v4_1_model = _load_model(V4_1_MODEL_PATH, v4_1.FEATURE_COLUMNS)
-
-    evaluation_config = v4_1.EvaluationConfig(
-        key=config.key,
-        label=config.label,
-        history_start=config.history_start,
-        history_end_exclusive=config.history_end_exclusive,
-        target_start=config.target_start,
-        target_end_exclusive=config.target_end_exclusive,
-        expected_rows=config.expected_rows,
-        baseline_mae=0.0,
-        baseline_rmse=0.0,
-    )
+    _ensure_environment()
+    v3_model = load_catboost_regressor(V3_MODEL_PATH, V3_FEATURE_COLUMNS)
+    v4_1_model = load_catboost_regressor(V4_1_MODEL_PATH, V4_1_FEATURE_COLUMNS)
 
     print(f"\nBuilding frozen-period features for {config.label}")
     print(
@@ -143,28 +106,28 @@ def build_prediction_frame(config: PeriodConfig) -> pd.DataFrame:
         f"target: [{config.target_start}, {config.target_end_exclusive})"
     )
 
-    conn = duckdb.connect(str(v4_1.DB_PATH), read_only=False)
-    temp_path = v4_1.TEMP_DIR.as_posix().replace("'", "''")
-    conn.execute(f"SET threads = {v4_1.DUCKDB_THREADS}")
-    conn.execute(f"SET temp_directory = '{temp_path}'")
-
+    conn = connect()
     try:
-        v4_1.create_source_tables(conn, evaluation_config)
-        v4_1.create_long_term_statistics(conn)
-        v4_1.create_recent_statistics(conn, evaluation_config)
-        v4_1.create_feature_table(conn)
+        create_source_tables(conn, config, table_prefix="eval")
+        create_long_term_statistics(conn, table_prefix="eval")
+        create_recent_statistics(
+            conn, config, table_prefix="eval", history_table="eval_history",
+        )
+        create_feature_table(
+            conn, table_prefix="eval", feature_columns=V4_1_FEATURE_COLUMNS,
+        )
 
         selected_columns = [
             "SEFER_ID",
             "SEFER_TARIHI",
-            *v4_1.FEATURE_COLUMNS,
+            *V4_1_FEATURE_COLUMNS,
             "target",
             "baseline_prediction",
             "baseline_source",
         ]
         frame = conn.execute(
-            f"SELECT {v4_1.sql_identifier_list(selected_columns)} "
-            "FROM evaluation_features"
+            f"SELECT {sql_identifier_list(selected_columns)} "
+            "FROM eval_features"
         ).fetchdf()
     finally:
         conn.close()
@@ -175,26 +138,15 @@ def build_prediction_frame(config: PeriodConfig) -> pd.DataFrame:
             f"received {len(frame):,}."
         )
 
-    for column in v4_1.CATEGORICAL_FEATURES:
-        frame[column] = frame[column].astype("string").fillna("missing")
-
-    missing = frame[v4_1.FEATURE_COLUMNS].isna().sum()
-    if int(missing.sum()) != 0:
-        raise RuntimeError(
-            "Feature matrix contains missing values:\n"
-            + missing[missing > 0].to_string()
-        )
+    validate_feature_frame(frame, feature_columns=V4_1_FEATURE_COLUMNS)
 
     print(f"Predicting {len(frame):,} rows with frozen v3 and v4.1 models")
     frame["v3_prediction"] = v3_model.predict(frame[V3_FEATURE_COLUMNS])
-    frame["v4_1_prediction"] = v4_1_model.predict(
-        frame[v4_1.FEATURE_COLUMNS]
-    )
+    frame["v4_1_prediction"] = v4_1_model.predict(frame[V4_1_FEATURE_COLUMNS])
     return frame
 
 
 def _above_100_signal(values: np.ndarray, threshold: float) -> np.ndarray:
-    # A zero threshold means "any observed >100 event", not the vacuous >= 0.
     if threshold == 0.0:
         return values > 0.0
     return values >= threshold
@@ -217,10 +169,7 @@ def apply_hybrid_rule(
         )
     )
     strong_signal = (
-        (
-            frame[P90_COLUMN].to_numpy(dtype=np.float64)
-            >= rule.strong_p90_threshold
-        )
+        (frame[P90_COLUMN].to_numpy(dtype=np.float64) >= rule.strong_p90_threshold)
         | _above_100_signal(
             frame[ABOVE_100_COLUMN].to_numpy(dtype=np.float64),
             rule.above_100_rate_threshold,
@@ -248,14 +197,11 @@ def comparison_metrics(
     models = [
         ("CatBoost v3", frame["v3_prediction"].to_numpy(dtype=np.float64)),
         ("CatBoost v4.1", frame["v4_1_prediction"].to_numpy(dtype=np.float64)),
-        (
-            "Weekday baseline",
-            frame["baseline_prediction"].to_numpy(dtype=np.float64),
-        ),
+        ("Weekday baseline", frame["baseline_prediction"].to_numpy(dtype=np.float64)),
         ("v4.2 hybrid", hybrid_prediction),
     ]
     return pd.DataFrame(
-        [{"model": name, **_metric_values(actual, prediction)} for name, prediction in models]
+        [{"model": name, **regression_metrics(actual, pred)} for name, pred in models]
     )
 
 
@@ -314,24 +260,12 @@ def target_group_metrics(
     ) / grouped["row_count"]
 
     required_order = [
-        "target_group",
-        "row_count",
-        "average_actual",
-        "average_v3_prediction",
-        "average_v4_1_prediction",
-        "average_baseline_prediction",
-        "average_hybrid_prediction",
-        "v3_mae",
-        "v4_1_mae",
-        "baseline_mae",
-        "hybrid_mae",
-        "v3_rmse",
-        "v4_1_rmse",
-        "baseline_rmse",
-        "hybrid_rmse",
-        "hybrid_bias",
-        "average_hybrid_weight",
-        "hybrid_activation_rate",
+        "target_group", "row_count", "average_actual",
+        "average_v3_prediction", "average_v4_1_prediction",
+        "average_baseline_prediction", "average_hybrid_prediction",
+        "v3_mae", "v4_1_mae", "baseline_mae", "hybrid_mae",
+        "v3_rmse", "v4_1_rmse", "baseline_rmse", "hybrid_rmse",
+        "hybrid_bias", "average_hybrid_weight", "hybrid_activation_rate",
     ]
     return grouped[required_order]
 
@@ -381,10 +315,15 @@ def export_period_results(
     return metrics, groups
 
 
-def _threshold_mask(values: np.ndarray, thresholds: list[float], *, positive_zero: bool = False) -> np.ndarray:
+def _threshold_mask(
+    values: np.ndarray, thresholds: list[Any], *, positive_zero: bool = False,
+) -> np.ndarray:
     mask = np.zeros(len(values), dtype=np.uint8)
     for index, threshold in enumerate(thresholds):
-        condition = values > 0.0 if positive_zero and threshold == 0.0 else values >= threshold
+        condition = (
+            values > 0.0 if positive_zero and threshold == 0.0
+            else values >= threshold
+        )
         mask |= condition.astype(np.uint8) << index
     return mask
 
@@ -395,7 +334,7 @@ def _build_search_cells(frame: pd.DataFrame) -> pd.DataFrame:
     baseline = frame["baseline_prediction"].to_numpy(dtype=np.float64)
     error = actual - v4_prediction
     delta = baseline - v4_prediction
-    strong_p90_thresholds = [value + STRONG_P90_OFFSET for value in P90_THRESHOLDS]
+    strong_p90_thresholds = [v + STRONG_P90_OFFSET for v in P90_THRESHOLDS]
 
     cells = pd.DataFrame(
         {
@@ -421,12 +360,8 @@ def _build_search_cells(frame: pd.DataFrame) -> pd.DataFrame:
         )
 
     group_columns = [
-        "upward_only",
-        "count_mask",
-        "p90_mask",
-        "strong_p90_mask",
-        "above_60_mask",
-        "above_100_mask",
+        "upward_only", "count_mask", "p90_mask",
+        "strong_p90_mask", "above_60_mask", "above_100_mask",
     ]
     return cells.groupby(group_columns, observed=True, sort=False).sum().reset_index()
 
@@ -519,7 +454,6 @@ def grid_search_hybrid(frame: pd.DataFrame) -> tuple[pd.DataFrame, HybridRule]:
     if allowed.empty:
         raise RuntimeError("No hybrid candidate satisfies the validation MAE safeguard.")
 
-    # Six-decimal equivalence implements the documented simpler/lower-weight tie-break.
     allowed["rmse_equivalence"] = (
         allowed["rmse"] / METRIC_EQUALITY_TOLERANCE
     ).round().astype(np.int64)
@@ -528,15 +462,9 @@ def grid_search_hybrid(frame: pd.DataFrame) -> tuple[pd.DataFrame, HybridRule]:
     ).round().astype(np.int64)
     selected_index = allowed.sort_values(
         by=[
-            "rmse_equivalence",
-            "mae_equivalence",
-            "strong_weight",
-            "moderate_weight",
-            "activation_rate",
-            "minimum_count",
-            "p90_threshold",
-            "above_60_rate_threshold",
-            "above_100_rate_threshold",
+            "rmse_equivalence", "mae_equivalence", "strong_weight",
+            "moderate_weight", "activation_rate", "minimum_count",
+            "p90_threshold", "above_60_rate_threshold", "above_100_rate_threshold",
         ],
         ascending=[True, True, True, True, True, False, False, False, False],
         kind="stable",
@@ -560,6 +488,8 @@ def save_frozen_rule(
     validation_config: PeriodConfig,
     candidates: pd.DataFrame,
 ) -> None:
+    from scripts.shared.paths import PROJECT_DIR
+
     selected = candidates.loc[candidates["selected"]].iloc[0]
     payload = {
         "schema_version": "catboost_v4_2_hybrid_rule_v1",
@@ -593,7 +523,7 @@ def save_frozen_rule(
 
 
 def load_frozen_rule() -> HybridRule:
-    ensure_environment(require_rule=True)
+    _ensure_environment(require_rule=True)
     payload = json.loads(RULE_PATH.read_text(encoding="utf-8"))
     if payload.get("schema_version") != "catboost_v4_2_hybrid_rule_v1":
         raise RuntimeError(f"Unsupported hybrid rule schema in {RULE_PATH}")
