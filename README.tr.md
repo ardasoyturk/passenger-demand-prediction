@@ -29,12 +29,25 @@ training/
 │   ├── api/                     # FastAPI servisi
 │   └── frontend/                # Preact/Vite arayüzü
 ├── scripts/                     # Sürümlenmiş eğitim ve değerlendirme akışları
-│   ├── baseline/                # Tarihsel ortalama taban çizgileri
-│   └── catboost/v1 … v4_5/      # Yeniden çalıştırılabilir model deneyleri
+│   ├── shared/                  # Ortak sabitler, DuckDB ile özellik üretimi, metrikler ve model yükleme
+│   ├── baseline/                # Ortak çalıştırıcıyı kullanan tarihsel ortalama taban modelleri
+│   └── catboost/v1 … v4_5/      # Ortak modülleri kullanan, yeniden çalıştırılabilir model deneyleri
 ├── pyproject.toml               # Python bağımlılıkları ve sürüm gereksinimi
 ├── package.json                 # Ön yüz ve arka yüz geliştirme komutları
 └── README.md                    # İngilizce dokümantasyon
 ```
+
+`scripts/` dizini eğitim ve değerlendirme akışlarını içerir. Her sürüm deneyi (`v4_1` ile `v4_5` arasındakiler) ortak kodu yalnızca `scripts/shared/` dizininden alır; başka bir sürümün kodunu içe aktarması gerekmez. Ortak modüller şunlardır:
+
+| Modül | Görevi |
+|---|---|
+| `scripts/shared/paths.py` | Proje dizini, veritabanı ve model yolları |
+| `scripts/shared/constants.py` | Özellik sütunları, gruplama anahtarları ve kaynak sütunlar |
+| `scripts/shared/period_config.py` | `PeriodConfig` veri sınıfı ile standart eğitim, doğrulama, test ve nihai dönemler |
+| `scripts/shared/feature_pipeline.py` | DuckDB ile özellik üretimi: kaynak tablolar, uzun dönem istatistikleri, yakın geçmiş pencereleri, özelliklerin birleştirilmesi ve sızıntı denetimi |
+| `scripts/shared/metrics.py` | Regresyon, sınıflandırma ve olasılık metrikleri |
+| `scripts/shared/model_utils.py` | CatBoost modelinin yüklenmesi ve özellik sözleşmesinin doğrulanması |
+| `scripts/shared/baseline_runner.py` | Parametrelerle çalışan hiyerarşik taban model çalıştırıcısı |
 
 `GUZERGAH_KODU` firma bazlıdır; güvenli güzergâh kimliği bu yüzden `FIRMA_ID + GUZERGAH_KODU` bileşimidir. `guzergah_canonical` tablosu ayrıca firma güzergâhlarını fiziksel güzergâhlara eşler. Böylece sistem hem firmaya özgü geçmişten hem de aynı fiziksel hattı işleten diğer firmaların geçmişinden yararlanabilir.
 
@@ -188,7 +201,7 @@ Model yaygın talep aralığında daha güçlü, nadir yüksek talepli seferlerd
 
 ## Araştırmayı yeniden çalıştırma ve yeni deney eğitimi
 
-`scripts/` dizini tarihsel eğitim ve değerlendirme akışlarını içerir. Her betiği proje kökünden çalıştırın; dosyaları taşımayın ve göreli yolları değiştirmeyin.
+`scripts/` dizini eğitim ve değerlendirme akışlarını içerir. Her sürüm deneyi sabitlerini ve yardımcı kodlarını `scripts/shared/` dizininden alır; diğer sürümlerden bağımsızdır. Her betiği proje kökünden çalıştırın; dosyaları taşımayın ve göreli yolları değiştirmeyin.
 
 ```powershell
 # Seçilen tarihsel ortalama taban çizgisi

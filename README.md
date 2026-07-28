@@ -29,12 +29,25 @@ training/
 │   ├── api/                     # FastAPI service
 │   └── frontend/                # Preact/Vite interface
 ├── scripts/                     # Versioned training and evaluation workflows
-│   ├── baseline/                # Historical-average baselines
-│   └── catboost/v1 … v4_5/      # Reproducible model experiments
+│   ├── shared/                  # Shared constants, DuckDB pipeline, metrics, and model loading
+│   ├── baseline/                # Historical-average baselines using the shared runner
+│   └── catboost/v1 … v4_5/      # Reproducible model experiments using shared modules only
 ├── pyproject.toml               # Python dependencies and version requirement
 ├── package.json                 # Frontend/backend development commands
 └── README.tr.md                 # Turkish documentation
 ```
+
+`scripts/` contains the training and evaluation workflows. Each versioned experiment (`v4_1` through `v4_5`) uses `scripts/shared/` and does not import code from another version. The shared modules provide:
+
+| Module | Purpose |
+|---|---|
+| `scripts/shared/paths.py` | Project directory, database, and model paths |
+| `scripts/shared/constants.py` | Feature-column definitions, grouping keys, and source columns |
+| `scripts/shared/period_config.py` | `PeriodConfig` dataclass and standard train/validation/test/final periods |
+| `scripts/shared/feature_pipeline.py` | DuckDB feature construction: source tables, long-term statistics, recent windows, feature assembly, and leakage validation |
+| `scripts/shared/metrics.py` | Regression, classification, and probability metrics |
+| `scripts/shared/model_utils.py` | CatBoost model loading with feature-contract validation |
+| `scripts/shared/baseline_runner.py` | Parametric hierarchical baseline runner |
 
 `GUZERGAH_KODU` is company-specific. The safe route identity is therefore `FIRMA_ID + GUZERGAH_KODU`. `guzergah_canonical` also maps each company route to a canonical physical route, so the model can use both company-specific history and shared physical-route history.
 
@@ -188,7 +201,7 @@ The model is strongest in the common demand range and underpredicts rare high-de
 
 ## Reproduce research and train a new experiment
 
-The `scripts/` tree contains the historical workflows. They are organized by version, so run each script from the project root rather than moving files or changing its relative paths.
+The `scripts/` tree contains the training and evaluation workflows. Each versioned experiment gets its constants and pipeline helpers from `scripts/shared/` and is independent of the other versions. Run each script from the project root rather than moving files or changing its relative paths.
 
 ```powershell
 # Selected historical-average baseline
