@@ -5,7 +5,13 @@ import type { RouteDurak } from '../api';
 
 type MappedStop = RouteDurak & { enlem: number; boylam: number };
 
-export function RouteMap({ duraklar }: { duraklar: RouteDurak[] }) {
+export function RouteMap({
+	duraklar,
+	highlightedStopId,
+}: {
+	duraklar: RouteDurak[];
+	highlightedStopId?: number;
+}) {
 	const mapElement = useRef<HTMLDivElement>(null);
 	const mappedStops = duraklar.filter(hasCoordinates);
 	const skippedCount = duraklar.length - mappedStops.length;
@@ -41,11 +47,12 @@ export function RouteMap({ duraklar }: { duraklar: RouteDurak[] }) {
 
 			mappedStops.forEach((stop, index) => {
 				const edge = index === 0 || index === mappedStops.length - 1;
+				const highlighted = stop.durak_id === highlightedStopId;
 				const marker = L.circleMarker([stop.enlem, stop.boylam], {
-					radius: edge ? 8 : 6,
+					radius: highlighted || edge ? 8 : 6,
 					color: '#ffffff',
 					weight: 3,
-					fillColor: edge ? '#0f172a' : '#64748b',
+					fillColor: highlighted ? '#10b981' : edge ? '#0f172a' : '#64748b',
 					fillOpacity: 1,
 				}).addTo(map!);
 
@@ -70,7 +77,7 @@ export function RouteMap({ duraklar }: { duraklar: RouteDurak[] }) {
 			resizeObserver?.disconnect();
 			map?.remove();
 		};
-	}, [duraklar]);
+	}, [duraklar, highlightedStopId]);
 
 	if (!mappedStops.length) {
 		return (

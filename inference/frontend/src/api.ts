@@ -98,6 +98,69 @@ export interface Durak {
 	boylam: number | null;
 }
 
+export interface StopAdditionRequest {
+	firma_id: number;
+	current_guzergah_kodu: number;
+	candidate_stop_uetds_yer_id: number;
+	requested_date: string;
+	requested_time: string;
+}
+
+export type StopAdditionDecision = 'APPROVE' | 'REVIEW' | 'REJECT';
+
+export interface StopAdditionPrediction {
+	FIRMA_ID: number;
+	CURRENT_GUZERGAH_KODU: number;
+	CANDIDATE_STOP_UETDS_YER_ID: number;
+	REQUESTED_DATE: string;
+	REQUESTED_TIME: string;
+	added_stop_uetds_yer_id: number;
+	base_stop_list: number[] | string;
+	proposed_stop_list: number[] | string;
+	selected_insertion_index: number;
+	base_route_haversine_km: number;
+	variant_route_haversine_km: number;
+	added_haversine_km: number;
+	detour_ratio: number;
+	training_scenario: string;
+	has_same_company_exact_proposed_history: boolean;
+	has_any_exact_proposed_history: boolean;
+	has_similar_route_history: boolean;
+	current_route_expected_demand_proxy: number | null;
+	proposed_route_hierarchical_baseline: number | null;
+	proposed_route_baseline_source: string;
+	proposed_route_history_same_company_time_count: number;
+	proposed_route_history_same_company_route_count: number;
+	proposed_route_history_all_company_time_count: number;
+	proposed_route_history_all_company_route_count: number;
+	proposed_route_history_similar_route_count: number;
+	proposed_route_history_similar_trip_count: number;
+	proposed_route_prediction: number;
+	current_route_prediction: number | null;
+	predicted_uplift: number | null;
+	current_route_prediction_status: string;
+	current_route_prediction_error: string | null;
+	current_route_reliability: Reliability | null;
+	current_route_reliability_reason: string | null;
+	current_route_baseline_source: string | null;
+	current_route_history_exact_time_weekday_count: number | null;
+	current_route_history_exact_time_count: number | null;
+	current_route_history_company_route_count: number | null;
+	current_route_history_canonical_time_weekday_count: number | null;
+	current_route_history_canonical_route_count: number | null;
+	prediction_status: string;
+	prediction_error: string | null;
+	business_decision: StopAdditionDecision;
+	decision_reason: string;
+	decision_score: number;
+	model_evidence_score: number;
+	decision_override: string | null;
+	decision_warnings: string | null;
+	is_company_origin_city: boolean;
+	company_origin_il_id: number | null;
+	added_stop_il_id: number | null;
+}
+
 async function jsonFetch<T>(
 	url: string,
 	init?: RequestInit,
@@ -156,4 +219,14 @@ export function getRoute(
 // GET /durak/{durakId}
 export function getDurak(durakId: number): Promise<Durak> {
 	return jsonFetch<Durak>(`${API_BASE}/durak/${durakId}`);
+}
+
+// POST /predict-stop-addition
+export function predictStopAddition(
+	payload: StopAdditionRequest,
+): Promise<StopAdditionPrediction> {
+	return jsonFetch<StopAdditionPrediction>(`${API_BASE}/predict-stop-addition`, {
+		method: 'POST',
+		body: JSON.stringify(payload),
+	});
 }

@@ -26,7 +26,10 @@ training/
 │   ├── predict_trip.py          # Tek sefer komut satırı aracı
 │   ├── predict_trips_batch.py   # CSV toplu tahmin aracı
 │   ├── check_trips.py           # İnceleme bayrakları üreten denetim aracı
-│   ├── api/                     # FastAPI servisi
+│   ├── stop_addition/           # Durak ekleme tahmini, artış ve iş kuralları
+│   ├── artifacts/stop_addition/ # Seçili durak ekleme modeli ve sözleşmesi
+│   ├── tests/stop_addition/     # Dondurulmuş 65 satırlık girdi ve referans
+│   ├── api/                     # İki proje için ortak FastAPI servisi
 │   └── frontend/                # Preact/Vite arayüzü
 ├── scripts/                     # Sürümlenmiş eğitim ve değerlendirme akışları
 │   ├── shared/                  # Ortak sabitler, DuckDB ile özellik üretimi, metrikler ve model yükleme
@@ -243,7 +246,10 @@ Arka yüzü başlatın:
 npm run backend
 ```
 
-OpenAPI arayüzü `http://localhost:8000/docs` adresindedir. API; `POST /predict`, `GET /health`, `GET /durak` altında durak sorguları ve `GET /route` altında firma güzergâh sorguları sunar.
+OpenAPI arayüzü `http://localhost:8000/docs` adresindedir. Ortak API;
+talep tahmini için `POST /predict`, tam durak ekleme değerlendirmesi için
+`POST /predict-stop-addition`, `GET /health`, `GET /durak` altında durak
+sorguları ve `GET /route` altında firma güzergâh sorguları sunar.
 
 Başka bir terminalde arayüzü çalıştırın:
 

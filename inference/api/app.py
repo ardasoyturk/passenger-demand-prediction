@@ -9,9 +9,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from inference.api.depends import Artifacts, Database
-from inference.api.routes import durak, predict, route
+from inference.api.routes import durak, predict, route, stop_addition
 from inference.api.schemas import HealthResponse
 from inference.engine import load_frozen_artifacts
+from inference.api.routes.stop_addition import load_stop_addition_contract
 
 
 def _cors_origins() -> list[str]:
@@ -23,6 +24,7 @@ def _cors_origins() -> list[str]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.artifacts = load_frozen_artifacts()
+    load_stop_addition_contract()
     yield
     del app.state.artifacts
 
@@ -45,6 +47,7 @@ app.add_middleware(
 app.include_router(predict.router)
 app.include_router(durak.router)
 app.include_router(route.router)
+app.include_router(stop_addition.router)
 
 
 @app.get("/health", response_model=HealthResponse, tags=["system"])

@@ -26,12 +26,17 @@ training/
 │   ├── predict_trip.py          # One-trip CLI
 │   ├── predict_trips_batch.py   # Batch CSV CLI
 │   ├── check_trips.py           # Audit CLI with review flags
-│   ├── api/                     # FastAPI service
+│   ├── stop_addition/           # Proposed-stop inference, uplift, and rules
+│   ├── artifacts/stop_addition/ # Selected stop-addition model and contract
+│   ├── tests/stop_addition/     # Frozen 65-row fixture and baseline
+│   ├── api/                     # Shared FastAPI service for both projects
 │   └── frontend/                # Preact/Vite interface
 ├── scripts/                     # Versioned training and evaluation workflows
 │   ├── shared/                  # Shared constants, DuckDB pipeline, metrics, and model loading
 │   ├── baseline/                # Historical-average baselines using the shared runner
+│   ├── stop_addition/           # Stop-addition training/reproducibility only
 │   └── catboost/v1 … v4_5/      # Reproducible model experiments using shared modules only
+├── archive/stop_addition/       # Preserved stop-addition analyses and frozen staging
 ├── pyproject.toml               # Python dependencies and version requirement
 ├── package.json                 # Frontend/backend development commands
 └── README.tr.md                 # Turkish documentation
@@ -122,6 +127,21 @@ uv run python inference/check_trips.py --input input.csv --output results/check.
 ```
 
 In addition to the prediction, the audit output includes strict-earlier route, exact-time, and weekday-time history statistics, nine review flags, and `any_review_flag`.
+
+### Stop-addition evaluation
+
+The stop-addition runtime is part of the same `inference/` backend and does not
+import anything from `scripts/`. The frozen 65-row regression can be run with:
+
+```powershell
+uv run python -m inference.stop_addition.evaluator `
+  --input inference/tests/stop_addition/fixtures/requests_65.csv `
+  --output stop_addition_evaluation.csv
+```
+
+It validates the request, inserts the proposed stop at the minimum-Haversine
+detour position, predicts proposed and current demand, calculates uplift, and
+applies the `APPROVE`/`REVIEW`/`REJECT` rules.
 
 ## What the production pipeline does
 
@@ -243,7 +263,10 @@ Start the backend:
 npm run backend
 ```
 
-Open `http://localhost:8000/docs` for the OpenAPI interface. The API exposes `POST /predict`, `GET /health`, stop lookup under `GET /durak`, and company-route lookup under `GET /route`.
+Open `http://localhost:8000/docs` for the OpenAPI interface. The shared API
+exposes demand inference at `POST /predict`, complete stop-addition evaluation
+at `POST /predict-stop-addition`, `GET /health`, stop lookup under
+`GET /durak`, and company-route lookup under `GET /route`.
 
 In a second terminal, install packages and start the frontend:
 
