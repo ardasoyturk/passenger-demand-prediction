@@ -1,7 +1,7 @@
 import { signal } from '@preact/signals';
 import type { TargetedEvent } from 'preact';
 import { useState } from 'preact/hooks';
-import { LoaderCircle } from 'lucide-preact';
+import { ChartNoAxesCombined, LoaderCircle } from 'lucide-preact';
 import type { PredictionRequest } from '../api';
 
 export interface PredictionFormProps {
@@ -12,17 +12,14 @@ export interface PredictionFormProps {
 const firmaId = signal('42185');
 const guzergahKodu = signal('110926');
 const seferTarihi = signal(new Date().toISOString().slice(0, 10));
-const departureHour = signal('13');
-const departureMinute = signal('00');
+const departureTime = signal('13:00');
 
 export function PredictionForm({ onSubmit, loading }: PredictionFormProps) {
 	const [touched, setTouched] = useState(false);
 	const firmaValid = firmaId.value !== '' && Number(firmaId.value) >= 0;
 	const guzergahValid = guzergahKodu.value !== '' && Number(guzergahKodu.value) >= 0;
 	const dateValid = seferTarihi.value !== '';
-	const hourValid = validInteger(departureHour.value, 0, 23);
-	const minuteValid = validInteger(departureMinute.value, 0, 59);
-	const timeValid = hourValid && minuteValid;
+	const timeValid = /^([01]\d|2[0-3]):[0-5]\d$/.test(departureTime.value);
 	const valid = firmaValid && guzergahValid && dateValid && timeValid;
 
 	function handleSubmit(event: TargetedEvent<HTMLFormElement>) {
@@ -33,7 +30,7 @@ export function PredictionForm({ onSubmit, loading }: PredictionFormProps) {
 			firma_id: Number(firmaId.value),
 			guzergah_kodu: Number(guzergahKodu.value),
 			sefer_tarihi: seferTarihi.value,
-			sefer_saati: `${pad(Number(departureHour.value))}:${pad(Number(departureMinute.value))}`,
+			sefer_saati: departureTime.value,
 		});
 	}
 
@@ -54,14 +51,10 @@ export function PredictionForm({ onSubmit, loading }: PredictionFormProps) {
 					<input type="date" min="2023-01-01" class={`${inputClass(touched && !dateValid)} [color-scheme:light]`} value={seferTarihi.value} onInput={(e) => (seferTarihi.value = e.currentTarget.value)} />
 				</Field>
 				<Field label="Kalkış saati" error={touched && !timeValid} errorMessage="Saat 00–23, dakika ise 00–59 arasında olmalı.">
-					<div class="flex items-center gap-2">
-						<input type="number" inputMode="numeric" min={0} max={23} step={1} aria-label="Saat" class={`${inputClass(touched && !hourValid)} text-center`} value={departureHour.value} onInput={(e) => (departureHour.value = e.currentTarget.value)} onBlur={() => { if (hourValid) departureHour.value = pad(Number(departureHour.value)); }} />
-						<span class="text-muted-foreground">:</span>
-						<input type="number" inputMode="numeric" min={0} max={59} step={1} aria-label="Dakika" class={`${inputClass(touched && !minuteValid)} text-center`} value={departureMinute.value} onInput={(e) => (departureMinute.value = e.currentTarget.value)} onBlur={() => { if (minuteValid) departureMinute.value = pad(Number(departureMinute.value)); }} />
-					</div>
+					<input type="time" aria-label="Kalkış saati" class={`${inputClass(touched && !timeValid)} [color-scheme:light]`} value={departureTime.value} onInput={(e) => (departureTime.value = e.currentTarget.value)} />
 				</Field>
 				<button type="submit" disabled={loading} class="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-md bg-primary px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 disabled:cursor-not-allowed disabled:opacity-60">
-					{loading && <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />}
+					{loading ? <LoaderCircle class="size-4 animate-spin" aria-hidden="true" /> : <ChartNoAxesCombined class="size-4" aria-hidden="true" />}
 					{loading ? 'Hesaplanıyor...' : 'Tahmin et'}
 				</button>
 			</div>
@@ -76,11 +69,3 @@ function Field({ label, error, errorMessage, children }: { label: string; error?
 function inputClass(error: boolean) {
 	return `h-10 min-w-0 w-full rounded-md border bg-white px-3 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus:ring-2 focus:ring-slate-400/25 ${error ? 'border-red-500 focus:border-red-500' : 'border-border focus:border-slate-400'}`;
 }
-
-function validInteger(value: string, min: number, max: number) {
-	if (value.trim() === '') return false;
-	const number = Number(value);
-	return Number.isInteger(number) && number >= min && number <= max;
-}
-
-function pad(value: number) { return String(value).padStart(2, '0'); }

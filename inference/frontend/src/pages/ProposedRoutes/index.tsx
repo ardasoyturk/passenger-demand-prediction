@@ -125,7 +125,7 @@ function ProposalForm({ onSubmit, loading }: { onSubmit: (request: StopAdditionR
 				<p class="mt-1 text-sm text-muted-foreground">Mevcut güzergâhı, eklenecek durağı ve planlanan sefer zamanını girin.</p>
 			</div>
 			<div class="grid gap-4 p-5 md:grid-cols-2 lg:grid-cols-[.85fr_1fr_1fr_1.1fr_.85fr_auto] lg:items-end">
-				<Field label="Firma" invalid={touched && !validId(firma)}>
+				<Field label="Firma ID" invalid={touched && !validId(firma)}>
 					<input aria-label="Firma" type="number" min={0} class={inputClass(touched && !validId(firma))} value={firma} onInput={(e) => setFirma(e.currentTarget.value)} />
 				</Field>
 				<Field label="Mevcut Güzergâh Kodu" invalid={touched && !validId(route)}>
