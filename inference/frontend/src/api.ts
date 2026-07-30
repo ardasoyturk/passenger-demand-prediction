@@ -79,6 +79,7 @@ export interface RouteDurak {
 
 export interface RouteDetailResponse {
 	firma_id: number;
+	firma_unvan: string | null;
 	guzergah_kodu: number;
 	canonical_guzergah_id: number;
 	duraklar: RouteDurak[];

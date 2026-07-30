@@ -13,6 +13,7 @@ import type {
 	StopAdditionRequest,
 } from '../../api';
 import { RouteMap } from '../../components/RouteMap';
+import { PredictionContext } from '../../components/PredictionContext';
 
 type Result =
 	| { status: 'idle' }
@@ -74,12 +75,14 @@ export function ProposedRoutes() {
 
 			{result.status === 'success' && (
 				<div class="mt-6 space-y-4">
-					<div class="flex flex-wrap items-center justify-between gap-2">
-						<h2 class="text-base font-semibold">Değerlendirme Sonucu</h2>
-						<p class="text-xs text-muted-foreground">
-							Firma {result.request.firma_id} · Güzergâh {result.request.current_guzergah_kodu} · {formatDate(result.request.requested_date)} {result.request.requested_time}
-						</p>
-					</div>
+					<PredictionContext
+						heading="Değerlendirme Sonucu"
+						companyId={result.request.firma_id}
+						companyTitle={result.currentRoute?.firma_unvan}
+						routeCode={result.request.current_guzergah_kodu}
+						date={result.request.requested_date}
+						time={result.request.requested_time}
+					/>
 					<DecisionSummary prediction={result.prediction} candidate={result.candidateStop} />
 					<Comparison prediction={result.prediction} />
 					<Evidence prediction={result.prediction} />
@@ -444,7 +447,6 @@ function titleCase(title: string) {
 	return title.toLocaleLowerCase('tr').split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 }
 function stopName(stop: Durak | null, id: number) { return stop?.uetds_adi ?? stop?.kisa_adi ?? `Durak ${id}`; }
-function formatDate(value: string) { const [year, month, day] = value.split('-'); return `${day}.${month}.${year}`; }
 function count(value: number | null | undefined) { return typeof value === 'number' && Number.isFinite(value) ? value : 0; }
 function hasLimitedComparison(prediction: StopAdditionPrediction) {
 	return count(prediction.current_route_history_exact_time_count) === 0

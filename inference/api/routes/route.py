@@ -49,9 +49,10 @@ def list_company_routes(firma_id: int, db: Database) -> CompanyRoutesResponse:
 def get_route(firma_id: int, guzergah_kodu: int, db: Database) -> RouteDetailResponse:
     route = db.execute(
         """
-        SELECT canonical_guzergah_id
-        FROM guzergah_canonical
-        WHERE firma_id = ? AND guzergah_kodu = ?
+        SELECT route.canonical_guzergah_id, company.unvan
+        FROM guzergah_canonical AS route
+        LEFT JOIN ats_firma AS company ON company.firma_id = route.firma_id
+        WHERE route.firma_id = ? AND route.guzergah_kodu = ?
         """,
         [firma_id, guzergah_kodu],
     ).fetchone()
@@ -93,6 +94,7 @@ def get_route(firma_id: int, guzergah_kodu: int, db: Database) -> RouteDetailRes
     ).fetchall()
     return RouteDetailResponse(
         firma_id=firma_id,
+        firma_unvan=route[1],
         guzergah_kodu=guzergah_kodu,
         canonical_guzergah_id=int(route[0]),
         duraklar=[

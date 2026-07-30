@@ -134,6 +134,7 @@ class RouteDurak(ApiModel):
 
 class RouteDetailResponse(ApiModel):
     firma_id: int
+    firma_unvan: str | None = None
     guzergah_kodu: int
     canonical_guzergah_id: int
     duraklar: list[RouteDurak]

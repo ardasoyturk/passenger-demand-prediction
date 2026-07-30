@@ -3,6 +3,7 @@ import { ChartNoAxesCombined, LoaderCircle, TriangleAlert } from 'lucide-preact'
 import { ApiError, getRoute, predict } from '../../api';
 import type { PredictionRequest, RouteDetailResponse, SimplifiedPrediction } from '../../api';
 import { PredictionForm } from '../../components/PredictionForm';
+import { PredictionContext } from '../../components/PredictionContext';
 import { PredictionResult } from '../../components/PredictionResult';
 import { RouteMap } from '../../components/RouteMap';
 import { RouteTimeline } from '../../components/RouteTimeline';
@@ -51,10 +52,14 @@ export function Home() {
 
 			{result.status === 'success' && (
 				<div class="mt-6 space-y-4">
-					<div class="flex flex-wrap items-center justify-between gap-2">
-						<h2 class="text-base font-semibold">Tahmin sonucu</h2>
-						<p class="text-xs text-muted-foreground">Firma {result.request.firma_id} · Güzergâh {result.request.guzergah_kodu} · {formatDate(result.request.sefer_tarihi)} {result.request.sefer_saati}</p>
-					</div>
+					<PredictionContext
+						heading="Tahmin sonucu"
+						companyId={result.request.firma_id}
+						companyTitle={result.route?.firma_unvan}
+						routeCode={result.request.guzergah_kodu}
+						date={result.request.sefer_tarihi}
+						time={result.request.sefer_saati}
+					/>
 					<PredictionResult prediction={result.prediction} />
 					{result.route ? (
 						<>
@@ -79,9 +84,4 @@ function ErrorBanner({ message }: { message: string }) {
 function errorMessage(error: unknown): string {
 	if (error instanceof Error) return error instanceof ApiError ? `Sunucu yanıtı: ${error.message}` : error.message;
 	return 'Bilinmeyen bir hata oluştu.';
-}
-
-function formatDate(value: string) {
-	const [year, month, day] = value.split('-');
-	return `${day}.${month}.${year}`;
 }
