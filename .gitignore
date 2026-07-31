@@ -54,3 +54,7 @@ dist-ssr
 
 archive
 *.duckdb
+
+# Local-only map diagnostics
+inference/frontend/firma-coverage.local.html
+inference/frontend/src/local/
