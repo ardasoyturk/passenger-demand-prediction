@@ -34,6 +34,10 @@ training/
 ├── scripts/                     # Sürümlenmiş eğitim ve değerlendirme akışları
 │   ├── shared/                  # Ortak sabitler, DuckDB ile özellik üretimi, metrikler ve model yükleme
 │   ├── baseline/                # Ortak çalıştırıcıyı kullanan tarihsel ortalama taban modelleri
+│   ├── stop_addition/           # Durak ekleme verisi, senaryoları ve model eğitimi
+│   │   ├── build_training_data.py
+│   │   ├── build_training_scenarios.py
+│   │   └── train_demand_model.py
 │   └── catboost/v1 … v4_5/      # Ortak modülleri kullanan, yeniden çalıştırılabilir model deneyleri
 ├── pyproject.toml               # Python bağımlılıkları ve sürüm gereksinimi
 ├── package.json                 # Ön yüz ve arka yüz geliştirme komutları
@@ -125,6 +129,49 @@ uv run python inference/check_trips.py --input input.csv --output results/check.
 ```
 
 Bu çıktı, tahmine ek olarak yalnızca teklif tarihinden önceki rota, tam saat ve hafta günü+saat istatistiklerini; dokuz inceleme bayrağını ve `any_review_flag` alanını içerir.
+
+### Durak ekleme değerlendirmesi
+
+Durak ekleme çalışma zamanı aynı `inference/` arka yüzünün parçasıdır ve
+`scripts/` altından kod içe aktarmaz. Dondurulmuş 65 satırlık regresyon testi
+şöyle çalıştırılır:
+
+```powershell
+uv run python -m inference.stop_addition.evaluator `
+  --input inference/tests/stop_addition/fixtures/requests_65.csv `
+  --output stop_addition_evaluation.csv
+```
+
+İstek doğrulanır, aday durak Haversine mesafesini en az artıran konuma eklenir,
+önerilen ve mevcut güzergâh talepleri ayrı ayrı tahmin edilir, talep artışı
+hesaplanır ve `APPROVE`/`REVIEW`/`REJECT` kuralları uygulanır.
+
+### Önerilen güzergâh tahmini nasıl çalışır?
+
+Durak ekleme özelliği karşı-olgusal bir soruyu yanıtlar: **mevcut bir güzergâha
+aday durak eklenirse beklenen talep ne olur?** Mevcut güzergâh tahminine sabit
+bir yolcu sayısı eklemez.
+
+1. İstek; firma güzergâhını, sefer tarihi ve saatini ve aday durağı belirtir.
+2. Güzergâh geometrisi, adayı ek Haversine mesafesini en aza indiren iki ardışık
+   durak arasına yerleştirir. Böylece sıralı önerilen durak dizisi, sapma
+   mesafesi ve sapma oranı elde edilir.
+3. Özellik üretimi yalnızca teklif tarihinden kesin olarak önceki geçmişi arar.
+   Kanıt; aynı firmanın önerilen güzergâhtaki geçmişinden, diğer firmaların aynı
+   güzergâhtaki geçmişine, geometrik olarak benzer güzergâhlara ve daha genel
+   firma/güzergâh geçmişine doğru geri düşer. Yanıt kanıt senaryosunu da verir;
+   böylece doğrudan geçmişe dayanan tahmin ile soğuk başlangıç ayrıştırılır.
+4. Dondurulmuş durak ekleme talep modeli oluşturulan güzergâh için tahmin
+   üretir. Normal üretim talep akışı aynı sefer için değiştirilmemiş mevcut
+   güzergâhı bağımsız olarak tahmin eder.
+5. `predicted_uplift`, önerilen güzergâh tahmininden mevcut güzergâh tahmininin
+   çıkarılmasıdır. İş kuralları bu farkı sapma büyüklüğü, beklenen talep ve kanıt
+   gücüyle birleştirerek uyarılar ve gerekçelerle birlikte `APPROVE`, `REVIEW`
+   veya `REJECT` sonucu üretir.
+
+Bu sonuç bir karar desteğidir, kârlılık tahmini değildir. Bilet fiyatını, araç
+kapasitesini, işletme maliyetini veya mesafe kontrolü dışındaki operasyonel
+uygulanabilirliği modellemez.
 
 ## Üretim tahmin akışı
 
@@ -218,6 +265,11 @@ uv run python scripts/catboost/v4_2/validation.py
 
 # v4.4 eşik sınıflandırıcılarının eğitimi
 uv run python scripts/catboost/v4_4/train.py
+
+# Durak ekleme önerilen güzergâh eğitim akışı
+uv run python scripts/stop_addition/build_training_data.py
+uv run python scripts/stop_addition/build_training_scenarios.py
+uv run python scripts/stop_addition/train_demand_model.py
 
 # Kronolojik değerlendirme örnekleri
 uv run python scripts/catboost/v4_1/test.py

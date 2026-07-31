@@ -34,7 +34,10 @@ training/
 ├── scripts/                     # Versioned training and evaluation workflows
 │   ├── shared/                  # Shared constants, DuckDB pipeline, metrics, and model loading
 │   ├── baseline/                # Historical-average baselines using the shared runner
-│   ├── stop_addition/           # Stop-addition training/reproducibility only
+│   ├── stop_addition/           # Stop-addition data, scenarios, and model training
+│   │   ├── build_training_data.py
+│   │   ├── build_training_scenarios.py
+│   │   └── train_demand_model.py
 │   └── catboost/v1 … v4_5/      # Reproducible model experiments using shared modules only
 ├── archive/stop_addition/       # Preserved stop-addition analyses and frozen staging
 ├── pyproject.toml               # Python dependencies and version requirement
@@ -143,6 +146,34 @@ It validates the request, inserts the proposed stop at the minimum-Haversine
 detour position, predicts proposed and current demand, calculates uplift, and
 applies the `APPROVE`/`REVIEW`/`REJECT` rules.
 
+### How proposed-route prediction works
+
+Stop addition answers a counterfactual question: **what demand should we expect
+if a candidate stop is inserted into an existing route?** It does not simply add
+a fixed number of passengers to the current-route prediction.
+
+1. The request identifies the company route, departure date and time, and
+   candidate stop.
+2. The route geometry places that stop between the adjacent stops that produce
+   the smallest additional Haversine distance. This creates the proposed ordered
+   stop sequence and measures its detour distance and ratio.
+3. The feature builder searches only history strictly earlier than the proposal
+   date. Evidence falls back from the same company on the exact proposed route,
+   to other companies on that route, to geometrically similar routes, and then
+   to broader company/route history. The response exposes the resulting evidence
+   scenario, so an exact-history estimate can be distinguished from a cold start.
+4. The frozen stop-addition demand model predicts demand for the constructed
+   route. The ordinary production demand pipeline independently predicts the
+   unchanged current route for the same departure.
+5. `predicted_uplift` is the proposed-route prediction minus the current-route
+   prediction. Business rules combine this uplift with detour size, predicted
+   demand, and evidence strength to return `APPROVE`, `REVIEW`, or `REJECT`,
+   together with warnings and supporting evidence.
+
+The decision is decision support rather than a profitability forecast. It does
+not model ticket price, vehicle capacity, operating cost, or whether a proposed
+stop is operationally feasible beyond the route-distance checks.
+
 ## What the production pipeline does
 
 For every proposal, it uses only trips dated **strictly before** the proposed departure date. This is the key protection against target leakage.
@@ -235,6 +266,11 @@ uv run python scripts/catboost/v4_2/validation.py
 
 # v4.4 threshold-classifier training
 uv run python scripts/catboost/v4_4/train.py
+
+# Stop-addition proposed-route training pipeline
+uv run python scripts/stop_addition/build_training_data.py
+uv run python scripts/stop_addition/build_training_scenarios.py
+uv run python scripts/stop_addition/train_demand_model.py
 
 # Chronological evaluation examples
 uv run python scripts/catboost/v4_1/test.py

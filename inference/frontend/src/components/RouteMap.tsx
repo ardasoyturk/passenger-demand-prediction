@@ -63,7 +63,7 @@ export function RouteMap({
 			});
 
 			if (positions.length === 1) {
-				map.setView(positions[0], 12);
+				map.setView(positions[0]!, 12);
 			} else {
 				map.fitBounds(L.latLngBounds(positions), { padding: [36, 36], maxZoom: 12 });
 			}

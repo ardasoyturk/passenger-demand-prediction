@@ -9,3 +9,4 @@
 21426 - 78654 - 225 - 22:00 (olumsuz)
 1063067 - 112617 - 63 - 09:30 (manuel inceleme gerekli)
 30 - 60588 - 63 - 11:00 (önerilmiyor)
+19717 - 108834 - 1051 - 17:00 (cold start, veri yok)
