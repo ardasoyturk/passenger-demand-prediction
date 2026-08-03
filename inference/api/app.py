@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from inference.api.depends import Artifacts, Database
-from inference.api.routes import durak, predict, predict_general, route, stop_addition
+from inference.api.routes import durak, gateway, predict, predict_general, route, stop_addition
 from inference.api.schemas import HealthResponse
 from inference.engine import load_frozen_artifacts
 from inference.api.routes.stop_addition import load_stop_addition_contract
@@ -49,6 +49,7 @@ app.include_router(predict_general.router)
 app.include_router(durak.router)
 app.include_router(route.router)
 app.include_router(stop_addition.router)
+app.include_router(gateway.router)
 
 
 @app.get("/health", response_model=HealthResponse, tags=["system"])

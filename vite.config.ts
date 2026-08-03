@@ -3,6 +3,14 @@ import preact from '@preact/preset-vite';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 
+const proxy = {
+	'/api': {
+		target: 'http://localhost:8000',
+		changeOrigin: true,
+		rewrite: (p: string) => p.replace(/^\/api/, ''),
+	},
+};
+
 // https://vitejs.dev/config/
 export default defineConfig({
 	root: 'inference/frontend',
@@ -15,12 +23,11 @@ export default defineConfig({
 		preact(),
 	],
 	server: {
-		proxy: {
-			'/api': {
-				target: 'http://localhost:8000',
-				changeOrigin: true,
-				rewrite: (p) => p.replace(/^\/api/, ''),
-			},
-		},
+		proxy,
+	},
+	// `vite preview` does not use `server.proxy`; keep preview behaviour equal
+	// to local development so it cannot regress to a cross-origin request.
+	preview: {
+		proxy,
 	},
 });

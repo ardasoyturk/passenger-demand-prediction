@@ -35,5 +35,6 @@
       "react-dom": ["./node_modules/preact/compat/"]
     }
   },
-  "include": ["inference/frontend/**/*", "node_modules/vite/client.d.ts"]
+  "include": ["inference/frontend/src/**/*", "node_modules/vite/client.d.ts"],
+  "exclude": ["inference/frontend/dist"]
 }

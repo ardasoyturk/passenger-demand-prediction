@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { BusFront, ChartNoAxesCombined, LoaderCircle, Route } from 'lucide-preact';
+import { BusFront, ChartNoAxesCombined, LoaderCircle, Route, Sparkles } from 'lucide-preact';
 import { getHealth } from '../api';
 
 type BackendStatus = 'checking' | 'ready' | 'offline';
@@ -51,6 +51,7 @@ export function Header() {
 				<nav class="order-3 flex w-full items-center gap-1 border-t border-border pt-2 sm:order-none sm:ml-5 sm:w-auto sm:border-0 sm:pt-0" aria-label="Ana menü">
 					<NavLink href="/" active={currentPath === '/'} Icon={ChartNoAxesCombined}>Sefer Talep Tahmini</NavLink>
 					<NavLink href="/proposed-routes" active={currentPath === '/proposed-routes'} Icon={Route}>Durak Ekleme Analizi</NavLink>
+					<NavLink href="/chat" active={currentPath === '/chat'} Icon={Sparkles}>Yapay Zekâ Asistanı</NavLink>
 				</nav>
 				<div class="ml-auto flex items-center gap-2 text-xs">
 					<BackendIndicator status={backendStatus} />

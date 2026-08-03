@@ -2,8 +2,8 @@ import type { RouteDurak } from '../api';
 
 export function RouteTimeline({ duraklar }: { duraklar: RouteDurak[] }) {
 	if (!duraklar.length) return <p class="rounded-lg border border-border bg-white p-5 text-sm text-muted-foreground">Bu güzergâh için durak bilgisi bulunamadı.</p>;
-	const departure = stopName(duraklar[0]);
-	const arrival = stopName(duraklar[duraklar.length - 1]);
+	const departure = stopName(duraklar[0]!);
+	const arrival = stopName(duraklar[duraklar.length - 1]!);
 
 	return (
 		<section class="animate-enter rounded-lg border border-border bg-white shadow-sm" aria-labelledby="route-heading">
