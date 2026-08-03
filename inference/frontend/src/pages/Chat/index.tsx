@@ -4,6 +4,8 @@ import { Bot, Check, Copy, LoaderCircle, Send, Sparkles, Square, Trash2, Triangl
 import type { TargetedEvent } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Markdown } from '../../components/Markdown';
+import { RouteMap } from '../../components/RouteMap';
+import type { RouteDurak } from '../../api';
 import { chatModel } from './llm';
 import { createPredictionMCPClient } from './mcp';
 import { getSystemPrompt } from './system-prompt';
@@ -12,6 +14,15 @@ interface ChatMessage {
 	id: string;
 	role: 'user' | 'assistant';
 	content: string;
+	maps?: ChatMap[];
+}
+
+interface ChatMap {
+	id: string;
+	title: string;
+	description: string;
+	duraklar: RouteDurak[];
+	highlightedStopId?: number;
 }
 
 const SUGGESTIONS: string[] = [
@@ -69,7 +80,7 @@ export function Chat() {
 		try {
 			mcpClient = await createPredictionMCPClient();
 			const tools = await mcpClient.tools();
-			const { textStream } = streamText({
+			const result = streamText({
 				model: chatModel,
 				instructions: getSystemPrompt(),
 				tools,
@@ -83,8 +94,12 @@ export function Chat() {
 				maxRetries: 1,
 				temperature: 0.2
 			});
-			for await (const delta of textStream) {
+			for await (const delta of result.textStream) {
 				setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m)));
+			}
+			const maps = mapsFromToolResults(await result.toolResults);
+			if (maps.length > 0) {
+				setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, maps } : m)));
 			}
 		} catch (err) {
 			if (!controller.signal.aborted) {
@@ -295,12 +310,123 @@ function MessageBubble({ message, active }: { message: ChatMessage; active: bool
 							<Markdown content={displayedContent} />
 							{(isTyping || active) && <span class="chat-caret" aria-hidden="true" />}
 						</div>
+						{!active && message.maps?.map((map) => (
+							<div key={map.id} class="mt-4">
+								<RouteMap
+									duraklar={map.duraklar}
+									highlightedStopId={map.highlightedStopId}
+									title={map.title}
+									description={map.description}
+								/>
+							</div>
+						))}
 						{!active && !isTyping && message.content !== '' && <MessageActions text={message.content} />}
 					</>
 				)}
 			</div>
 		</div>
 	);
+}
+
+function mapsFromToolResults(toolResults: Awaited<ReturnType<typeof streamText>>['toolResults'] extends PromiseLike<infer T> ? T : never): ChatMap[] {
+	const maps: ChatMap[] = [];
+	for (const result of toolResults) {
+		if (result.type !== 'tool-result') continue;
+		if (result.toolName === 'get_company_route_details' || result.toolName === 'get_canonical_route_details') {
+			const duraklar = routeStops(result.output);
+			if (duraklar.length > 0) {
+				maps.push({
+					id: result.toolCallId,
+					title: 'Güzergâh haritası',
+					description: 'Araçtan alınan sıralı güzergâh konumları',
+					duraklar,
+				});
+			}
+		}
+		if (result.toolName === 'get_stop_details') {
+			const stop = stopFromResult(result.output);
+			if (stop) {
+				maps.push({
+					id: result.toolCallId,
+					title: 'Durak konumu',
+					description: stop.durak_adi ?? `Durak ${stop.durak_id}`,
+					duraklar: [stop],
+					highlightedStopId: stop.durak_id,
+				});
+			}
+		}
+	}
+	return maps;
+}
+
+function routeStops(value: unknown): RouteDurak[] {
+	value = unwrapMcpToolOutput(value);
+	if (!isRecord(value) || !Array.isArray(value.duraklar)) return [];
+	return value.duraklar.flatMap((stop) => {
+		const parsed = routeStopFromResult(stop);
+		return parsed ? [parsed] : [];
+	});
+}
+
+function stopFromResult(value: unknown): RouteDurak | null {
+	value = unwrapMcpToolOutput(value);
+	if (!isRecord(value)) return null;
+	return routeStopFromResult({
+		sira: 1,
+		durak_id: value.id,
+		durak_adi: value.uetds_adi,
+		kisa_adi: value.kisa_adi,
+		il_id: value.il_id,
+		ilce_id: value.ilce_id,
+		enlem: value.enlem,
+		boylam: value.boylam,
+	});
+}
+
+function routeStopFromResult(value: unknown): RouteDurak | null {
+	if (!isRecord(value) || !isFiniteNumber(value.sira) || !isFiniteNumber(value.durak_id)) return null;
+	return {
+		sira: value.sira,
+		durak_id: value.durak_id,
+		durak_adi: nullableString(value.durak_adi),
+		kisa_adi: nullableString(value.kisa_adi),
+		il_id: nullableNumber(value.il_id),
+		ilce_id: nullableNumber(value.ilce_id),
+		enlem: nullableNumber(value.enlem),
+		boylam: nullableNumber(value.boylam),
+	};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null;
+}
+
+/** MCP's dynamically discovered tools return the protocol result wrapper. */
+function unwrapMcpToolOutput(value: unknown): unknown {
+	if (!isRecord(value)) return value;
+	if (isRecord(value.structuredContent)) return value.structuredContent;
+	if (!Array.isArray(value.content)) return value;
+	const textPart = value.content.find((part): part is { type: 'text'; text: string } => (
+		isRecord(part) && part.type === 'text' && typeof part.text === 'string'
+	));
+	if (!textPart) return value;
+	try {
+		return JSON.parse(textPart.text) as unknown;
+	} catch {
+		return value;
+	}
+}
+
+function isFiniteNumber(value: unknown): value is number {
+	return typeof value === 'number' && Number.isFinite(value);
+}
+
+function nullableNumber(value: unknown): number | null {
+	return isFiniteNumber(value) ? value : null;
+}
+
+function nullableString(value: unknown): string | null {
+	return typeof value === 'string' ? value : null;
 }
 
 /** Smooths network-sized stream chunks into a readable typewriter cadence. */

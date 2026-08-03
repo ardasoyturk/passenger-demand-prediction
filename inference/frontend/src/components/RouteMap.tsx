@@ -8,9 +8,13 @@ type MappedStop = RouteDurak & { enlem: number; boylam: number };
 export function RouteMap({
 	duraklar,
 	highlightedStopId,
+	title = 'Güzergâh haritası',
+	description,
 }: {
 	duraklar: RouteDurak[];
 	highlightedStopId?: number;
+	title?: string;
+	description?: string;
 }) {
 	const mapElement = useRef<HTMLDivElement>(null);
 	const mappedStops = duraklar.filter(hasCoordinates);
@@ -82,19 +86,20 @@ export function RouteMap({
 	if (!mappedStops.length) {
 		return (
 			<section class="animate-enter rounded-lg border border-dashed border-border bg-white p-5">
-				<h2 class="text-sm font-semibold">Güzergâh haritası</h2>
+				<h2 class="text-sm font-semibold">{title}</h2>
 				<p class="mt-1 text-sm text-muted-foreground">Koordinat bilgisi bulunan durak olmadığı için harita gösterilemiyor.</p>
 			</section>
 		);
 	}
 
 	return (
-		<section class="animate-enter overflow-hidden rounded-lg border border-border bg-white shadow-sm" aria-labelledby="route-map-heading">
+		<section class="animate-enter overflow-hidden rounded-lg border border-border bg-white shadow-sm" aria-label={title}>
 			<div class="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
 				<div>
-					<h2 id="route-map-heading" class="text-sm font-semibold">Güzergâh haritası</h2>
+					<h2 class="text-sm font-semibold">{title}</h2>
 					<p class="mt-1 text-sm text-muted-foreground">
-						{mappedStops.length} durak haritada gösteriliyor
+						{description ?? `${mappedStops.length} durak haritada gösteriliyor`}
+						{description && ` · ${mappedStops.length} konum gösteriliyor`}
 						{skippedCount > 0 && ` · ${skippedCount} konumsuz durak atlandı`}
 					</p>
 				</div>
