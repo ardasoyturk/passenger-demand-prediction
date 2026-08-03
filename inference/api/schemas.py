@@ -19,6 +19,11 @@ class PredictionRequest(ApiModel):
     sefer_saati: time
 
 
+class GeneralPredictionRequest(ApiModel):
+    firma_id: int = Field(ge=0)
+    guzergah_kodu: int = Field(ge=0)
+
+
 class ThresholdProbabilities(ApiModel):
     ge_10: float = Field(ge=0.0, le=1.0)
     ge_20: float = Field(ge=0.0, le=1.0)
@@ -85,6 +90,22 @@ class DetailedPrediction(ApiModel):
     mixed_demand_label: str
     classifier_monotonicity_violation: int
     classifier_monotonicity_correction_applied: int
+    prediction_reliability: str
+    reliability_reason: str
+
+
+class GeneralPrediction(ApiModel):
+    FIRMA_ID: int
+    GUZERGAH_KODU: int
+    canonical_route_id: int
+    expected_demand: float
+    baseline_source: str
+    baseline_trip_count: int = Field(ge=0)
+    company_route_count: int = Field(ge=0)
+    company_route_mean: float | None = None
+    canonical_route_count: int = Field(ge=0)
+    canonical_route_mean: float | None = None
+    demand_label: str
     prediction_reliability: str
     reliability_reason: str
 

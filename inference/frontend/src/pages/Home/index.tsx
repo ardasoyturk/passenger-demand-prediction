@@ -1,28 +1,39 @@
 import { useState } from 'preact/hooks';
 import { ChartNoAxesCombined, LoaderCircle, TriangleAlert } from 'lucide-preact';
-import { ApiError, getRoute, predict } from '../../api';
-import type { PredictionRequest, RouteDetailResponse, SimplifiedPrediction } from '../../api';
+import { ApiError, getRoute, predict, predictGeneral } from '../../api';
+import type { GeneralPrediction, GeneralPredictionRequest, PredictionRequest, RouteDetailResponse, SimplifiedPrediction } from '../../api';
 import { PredictionForm } from '../../components/PredictionForm';
+import type { PredictionFormRequest } from '../../components/PredictionForm';
 import { PredictionContext } from '../../components/PredictionContext';
 import { PredictionResult } from '../../components/PredictionResult';
+import { GeneralPredictionResult } from '../../components/GeneralPredictionResult';
 import { RouteMap } from '../../components/RouteMap';
 import { RouteTimeline } from '../../components/RouteTimeline';
 
 type Result =
 	| { status: 'idle' }
 	| { status: 'loading' }
-	| { status: 'success'; prediction: SimplifiedPrediction; route: RouteDetailResponse | null; request: PredictionRequest }
-	| { status: 'error'; message: string };
+	| { status: 'error'; message: string }
+	| { status: 'success'; mode: 'trip'; prediction: SimplifiedPrediction; route: RouteDetailResponse | null; request: PredictionRequest }
+	| { status: 'success'; mode: 'general'; prediction: GeneralPrediction; route: RouteDetailResponse | null; request: GeneralPredictionRequest };
 
 export function Home() {
 	const [result, setResult] = useState<Result>({ status: 'idle' });
 
-	async function handleSubmit(request: PredictionRequest) {
+	async function handleSubmit(submission: PredictionFormRequest) {
 		setResult({ status: 'loading' });
 		try {
+			if (submission.mode === 'general') {
+				const { request } = submission;
+				const [prediction, route] = await Promise.allSettled([predictGeneral(request), getRoute(request.firma_id, request.guzergah_kodu)]);
+				if (prediction.status === 'rejected') throw prediction.reason;
+				setResult({ status: 'success', mode: 'general', prediction: prediction.value, route: route.status === 'fulfilled' ? route.value : null, request });
+				return;
+			}
+			const { request } = submission;
 			const [prediction, route] = await Promise.allSettled([predict(request), getRoute(request.firma_id, request.guzergah_kodu)]);
 			if (prediction.status === 'rejected') throw prediction.reason;
-			setResult({ status: 'success', prediction: prediction.value, route: route.status === 'fulfilled' ? route.value : null, request });
+			setResult({ status: 'success', mode: 'trip', prediction: prediction.value, route: route.status === 'fulfilled' ? route.value : null, request });
 		} catch (error) {
 			setResult({ status: 'error', message: errorMessage(error) });
 		}
@@ -50,7 +61,7 @@ export function Home() {
 				</div>
 			)}
 
-			{result.status === 'success' && (
+			{result.status === 'success' && result.mode === 'trip' && (
 				<div class="mt-6 space-y-4">
 					<PredictionContext
 						heading="Tahmin sonucu"
@@ -61,6 +72,24 @@ export function Home() {
 						time={result.request.sefer_saati}
 					/>
 					<PredictionResult prediction={result.prediction} />
+					{result.route ? (
+						<>
+							<RouteTimeline duraklar={result.route.duraklar} />
+							<RouteMap duraklar={result.route.duraklar} />
+						</>
+					) : <div class="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">Tahmin hazır; güzergâh durakları alınamadı.</div>}
+				</div>
+			)}
+
+			{result.status === 'success' && result.mode === 'general' && (
+				<div class="mt-6 space-y-4">
+					<PredictionContext
+						heading="Genel talep tahmini"
+						companyId={result.request.firma_id}
+						companyTitle={result.route?.firma_unvan}
+						routeCode={result.request.guzergah_kodu}
+					/>
+					<GeneralPredictionResult prediction={result.prediction} />
 					{result.route ? (
 						<>
 							<RouteTimeline duraklar={result.route.duraklar} />

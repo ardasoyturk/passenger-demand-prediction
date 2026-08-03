@@ -26,10 +26,7 @@ export function PredictionResult({ prediction }: { prediction: SimplifiedPredict
 				</div>
 			</div>
 
-			<div class="h-full rounded-lg border border-border bg-white p-5 shadow-sm">
-				<p class="text-sm font-medium text-muted-foreground">Talep seviyesi</p>
-				<div class="mt-4"><DemandStatus label={demand_label} /></div>
-			</div>
+			<DemandStatus label={demand_label} />
 
 			<div class="h-full lg:col-span-2">
 				<ReliabilityStatus level={reliability} reason={reliability_reason} />

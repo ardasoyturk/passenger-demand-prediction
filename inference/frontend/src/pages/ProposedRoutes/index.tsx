@@ -367,9 +367,9 @@ function apiErrorLabel(value: string) {
 	return labels[value] ?? `Sunucu yanıtı: ${value}`;
 }
 function decisionConfig(decision: StopAdditionPrediction['business_decision']) {
-	if (decision === 'APPROVE') return { label: 'Önerilir', shell: 'border-emerald-200 bg-emerald-50 text-emerald-950', badge: 'bg-emerald-600 text-white', icon: 'bg-emerald-600 text-white', Icon: BadgeCheck };
-	if (decision === 'REJECT') return { label: 'Önerilmez', shell: 'border-red-200 bg-red-50 text-red-950', badge: 'bg-red-600 text-white', icon: 'bg-red-600 text-white', Icon: Ban };
-	return { label: 'İnceleme gerekli', shell: 'border-amber-200 bg-amber-50 text-amber-950', badge: 'bg-amber-500 text-white', icon: 'bg-amber-500 text-white', Icon: CircleHelp };
+	if (decision === 'APPROVE') return { label: 'Önerilir', shell: 'border-emerald-300 bg-emerald-100/70 text-emerald-950', badge: 'bg-emerald-700 text-white', icon: 'bg-emerald-700 text-white', Icon: BadgeCheck };
+	if (decision === 'REJECT') return { label: 'Önerilmez', shell: 'border-red-300 bg-red-100/70 text-red-950', badge: 'bg-red-700 text-white', icon: 'bg-red-700 text-white', Icon: Ban };
+	return { label: 'İnceleme gerekli', shell: 'border-amber-300 bg-amber-100/70 text-amber-950', badge: 'bg-amber-600 text-white', icon: 'bg-amber-600 text-white', Icon: CircleHelp };
 }
 function decisionLabel(prediction: StopAdditionPrediction) {
 	return prediction.decision_override === 'ORIGIN_CITY_HARD_APPROVE'

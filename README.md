@@ -300,7 +300,9 @@ npm run backend
 ```
 
 Open `http://localhost:8000/docs` for the OpenAPI interface. The shared API
-exposes demand inference at `POST /predict`, complete stop-addition evaluation
+exposes demand inference at `POST /predict`, time-independent general route
+demand (historical baseline only, no v4.2/v4.4 models) at
+`POST /predict-general`, complete stop-addition evaluation
 at `POST /predict-stop-addition`, `GET /health`, stop lookup under
 `GET /durak`, and company-route lookup under `GET /route`.
 

@@ -66,6 +66,29 @@ export interface PredictionRequest {
 	sefer_saati: string; // HH:MM
 }
 
+export interface GeneralPredictionRequest {
+	firma_id: number;
+	guzergah_kodu: number;
+}
+
+export type GeneralBaselineSource = 'company_route' | 'canonical_route' | 'global';
+
+export interface GeneralPrediction {
+	FIRMA_ID: number;
+	GUZERGAH_KODU: number;
+	canonical_route_id: number;
+	expected_demand: number;
+	baseline_source: GeneralBaselineSource;
+	baseline_trip_count: number;
+	company_route_count: number;
+	company_route_mean: number | null;
+	canonical_route_count: number;
+	canonical_route_mean: number | null;
+	demand_label: DemandLabel;
+	prediction_reliability: Reliability;
+	reliability_reason: string;
+}
+
 export interface RouteDurak {
 	sira: number;
 	durak_id: number;
@@ -202,6 +225,16 @@ export function predict(
 ): Promise<SimplifiedPrediction> {
 	const url = `${API_BASE}/predict${options.detail ? '?detail=true' : ''}`;
 	return jsonFetch<SimplifiedPrediction>(url, {
+		method: 'POST',
+		body: JSON.stringify(payload),
+	});
+}
+
+// POST /predict-general
+export function predictGeneral(
+	payload: GeneralPredictionRequest,
+): Promise<GeneralPrediction> {
+	return jsonFetch<GeneralPrediction>(`${API_BASE}/predict-general`, {
 		method: 'POST',
 		body: JSON.stringify(payload),
 	});

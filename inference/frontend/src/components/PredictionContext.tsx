@@ -12,8 +12,8 @@ export function PredictionContext({
 	companyId: number;
 	companyTitle?: string | null;
 	routeCode: number;
-	date: string;
-	time: string;
+	date?: string;
+	time?: string;
 }) {
 	const title = companyTitle?.trim() ? titleCase(companyTitle) : `Firma ${companyId}`;
 
@@ -26,8 +26,13 @@ export function PredictionContext({
 				</div>
 				<p class="shrink-0 text-xs tabular-nums text-muted-foreground">
 					Firma {companyId} <span class="px-1 text-slate-300">·</span>
-					Güzergâh {routeCode} <span class="px-1 text-slate-300">·</span>
-					{formatDate(date)} {time}
+					Güzergâh {routeCode}
+					{date && time && (
+						<>
+							<span class="px-1 text-slate-300">·</span>
+							{formatDate(date)} {time}
+						</>
+					)}
 				</p>
 			</div>
 			<h2 class="mt-3 text-base font-semibold">{heading}</h2>

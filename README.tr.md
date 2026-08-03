@@ -299,7 +299,9 @@ npm run backend
 ```
 
 OpenAPI arayüzü `http://localhost:8000/docs` adresindedir. Ortak API;
-talep tahmini için `POST /predict`, tam durak ekleme değerlendirmesi için
+talep tahmini için `POST /predict`, gün ve saat gerektirmeyen genel rota talep
+tahmini (yalnızca tarihsel ortalama baseline; v4.2/v4.4 modelleri çalıştırılmaz)
+için `POST /predict-general`, tam durak ekleme değerlendirmesi için
 `POST /predict-stop-addition`, `GET /health`, `GET /durak` altında durak
 sorguları ve `GET /route` altında firma güzergâh sorguları sunar.
 
