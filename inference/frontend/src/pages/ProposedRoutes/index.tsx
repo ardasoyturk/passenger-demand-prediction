@@ -6,11 +6,11 @@ import {
 	MapPinPlus, Network, Route, SearchCheck, TrendingUp,
 } from 'lucide-preact';
 import {
-	ApiError, getDurak, getRoute, predictStopAddition,
+	ApiError, getDurak, getRoute, predictGeneralStopAddition, predictStopAddition,
 } from '../../api';
 import type {
-	Durak, RouteDetailResponse, RouteDurak, StopAdditionPrediction,
-	StopAdditionRequest,
+	Durak, GeneralStopAdditionRequest, RouteDetailResponse, RouteDurak,
+	StopAdditionPrediction, StopAdditionRequest,
 } from '../../api';
 import { RouteMap } from '../../components/RouteMap';
 import { PredictionContext } from '../../components/PredictionContext';
@@ -19,32 +19,39 @@ type Result =
 	| { status: 'idle' }
 	| { status: 'loading' }
 	| { status: 'error'; message: string }
-	| {
-		status: 'success';
-		prediction: StopAdditionPrediction;
-		request: StopAdditionRequest;
-		currentRoute: RouteDetailResponse | null;
-		candidateStop: Durak | null;
-	};
+	| { status: 'success'; mode: 'trip'; prediction: StopAdditionPrediction; request: StopAdditionRequest; currentRoute: RouteDetailResponse | null; candidateStop: Durak | null }
+	| { status: 'success'; mode: 'general'; prediction: StopAdditionPrediction; request: GeneralStopAdditionRequest; currentRoute: RouteDetailResponse | null; candidateStop: Durak | null };
+
+type StopAdditionMode = 'trip' | 'general';
+type StopAdditionSubmission =
+	| { mode: 'trip'; request: StopAdditionRequest }
+	| { mode: 'general'; request: GeneralStopAdditionRequest };
 
 export function ProposedRoutes() {
 	const [result, setResult] = useState<Result>({ status: 'idle' });
 
-	async function handleSubmit(request: StopAdditionRequest) {
+	async function handleSubmit(submission: StopAdditionSubmission) {
 		setResult({ status: 'loading' });
 		try {
-			const prediction = await predictStopAddition(request);
+			const { request } = submission;
+			const prediction = submission.mode === 'general'
+				? await predictGeneralStopAddition(submission.request)
+				: await predictStopAddition(submission.request);
 			const [currentRoute, candidateStop] = await Promise.allSettled([
 				getRoute(request.firma_id, request.current_guzergah_kodu),
 				getDurak(request.candidate_stop_uetds_yer_id),
 			]);
-			setResult({
+			const context = {
 				status: 'success',
 				prediction,
-				request,
 				currentRoute: currentRoute.status === 'fulfilled' ? currentRoute.value : null,
 				candidateStop: candidateStop.status === 'fulfilled' ? candidateStop.value : null,
-			});
+			} as const;
+			if (submission.mode === 'general') {
+				setResult({ ...context, mode: 'general', request: submission.request });
+			} else {
+				setResult({ ...context, mode: 'trip', request: submission.request });
+			}
 		} catch (error) {
 			setResult({ status: 'error', message: errorMessage(error) });
 		}
@@ -75,17 +82,17 @@ export function ProposedRoutes() {
 
 			{result.status === 'success' && (
 				<div class="mt-6 space-y-4">
-					<PredictionContext
-						heading="Değerlendirme Sonucu"
+						<PredictionContext
+							heading={result.mode === 'general' ? 'Genel Değerlendirme Sonucu' : 'Değerlendirme Sonucu'}
 						companyId={result.request.firma_id}
 						companyTitle={result.currentRoute?.firma_unvan}
 						routeCode={result.request.current_guzergah_kodu}
-						date={result.request.requested_date}
-						time={result.request.requested_time}
+						date={result.mode === 'trip' ? result.request.requested_date : undefined}
+						time={result.mode === 'trip' ? result.request.requested_time : undefined}
 					/>
 					<DecisionSummary prediction={result.prediction} candidate={result.candidateStop} />
 					<Comparison prediction={result.prediction} />
-					<Evidence prediction={result.prediction} />
+					<Evidence prediction={result.prediction} general={result.mode === 'general'} />
 					<ProposedTimeline stops={proposedStops} insertedStopId={result.prediction.added_stop_uetds_yer_id} />
 					{proposedStops.length > 0 && (
 						<RouteMap
@@ -99,35 +106,65 @@ export function ProposedRoutes() {
 	);
 }
 
-function ProposalForm({ onSubmit, loading }: { onSubmit: (request: StopAdditionRequest) => void; loading: boolean }) {
+const MODES: { value: StopAdditionMode; label: string }[] = [
+	{ value: 'trip', label: 'Sefer bazlı' },
+	{ value: 'general', label: 'Genel rota' },
+];
+
+function ProposalForm({ onSubmit, loading }: { onSubmit: (submission: StopAdditionSubmission) => void; loading: boolean }) {
+	const [mode, setMode] = useState<StopAdditionMode>('trip');
 	const [firma, setFirma] = useState('49');
 	const [route, setRoute] = useState('5866');
 	const [stop, setStop] = useState('44');
 	const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
 	const [time, setTime] = useState('13:00');
 	const [touched, setTouched] = useState(false);
-	const valid = [firma, route, stop].every(validId) && Boolean(date) && /^\d{2}:\d{2}$/.test(time);
+	const general = mode === 'general';
+	const valid = [firma, route, stop].every(validId)
+		&& (general || (Boolean(date) && /^\d{2}:\d{2}$/.test(time)));
 
 	function submit(event: TargetedEvent<HTMLFormElement>) {
 		event.preventDefault();
 		setTouched(true);
 		if (!valid || loading) return;
-		onSubmit({
+		const base = {
 			firma_id: Number(firma),
 			current_guzergah_kodu: Number(route),
 			candidate_stop_uetds_yer_id: Number(stop),
-			requested_date: date,
-			requested_time: time,
-		});
+		};
+		if (general) {
+			onSubmit({ mode: 'general', request: base });
+			return;
+		}
+		onSubmit({ mode: 'trip', request: { ...base, requested_date: date, requested_time: time } });
 	}
 
 	return (
 		<form noValidate onSubmit={submit} class="rounded-lg border border-border bg-white shadow-sm">
-			<div class="border-b border-border px-5 py-4">
-				<h2 class="text-sm font-semibold">Öneri Bilgileri</h2>
-				<p class="mt-1 text-sm text-muted-foreground">Mevcut güzergâhı, eklenecek durağı ve planlanan sefer zamanını girin.</p>
+			<div class="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
+				<div>
+					<h2 class="text-sm font-semibold">{general ? 'Genel öneri bilgileri' : 'Öneri bilgileri'}</h2>
+					<p class="mt-1 text-sm text-muted-foreground">
+						{general
+							? 'Tarih ve saat olmadan, genel güzergâh talebi ve mesafe etkisiyle değerlendirin.'
+							: 'Mevcut güzergâhı, eklenecek durağı ve planlanan sefer zamanını girin.'}
+					</p>
+				</div>
+				<div class="inline-flex shrink-0 rounded-md border border-border bg-muted p-0.5" role="group" aria-label="Değerlendirme türü">
+					{MODES.map((item) => (
+						<button
+							key={item.value}
+							type="button"
+							aria-pressed={mode === item.value}
+							onClick={() => setMode(item.value)}
+							class={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${mode === item.value ? 'bg-white text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+						>
+							{item.label}
+						</button>
+					))}
+				</div>
 			</div>
-			<div class="grid gap-4 p-5 md:grid-cols-2 lg:grid-cols-[.85fr_1fr_1fr_1.1fr_.85fr_auto] lg:items-end">
+			<div class={`grid gap-4 p-5 md:grid-cols-2 lg:items-end ${general ? 'lg:grid-cols-[.85fr_1fr_1fr_auto]' : 'lg:grid-cols-[.85fr_1fr_1fr_1.1fr_.85fr_auto]'}`}>
 				<Field label="Firma ID" invalid={touched && !validId(firma)}>
 					<input aria-label="Firma" type="number" min={0} class={inputClass(touched && !validId(firma))} value={firma} onInput={(e) => setFirma(e.currentTarget.value)} />
 				</Field>
@@ -137,15 +174,19 @@ function ProposalForm({ onSubmit, loading }: { onSubmit: (request: StopAdditionR
 				<Field label="Eklenecek Durak" invalid={touched && !validId(stop)}>
 					<input aria-label="Eklenecek Durak" type="number" min={0} class={inputClass(touched && !validId(stop))} value={stop} onInput={(e) => setStop(e.currentTarget.value)} />
 				</Field>
-				<Field label="Planlanan Sefer Tarihi" invalid={touched && !date}>
-					<input aria-label="Planlanan Sefer Tarihi" type="date" min="2023-01-01" class={`${inputClass(touched && !date)} [color-scheme:light]`} value={date} onInput={(e) => setDate(e.currentTarget.value)} />
-				</Field>
-				<Field label="Planlanan Kalkış Saati" invalid={touched && !time}>
-					<input aria-label="Planlanan Kalkış Saati" type="time" class={`${inputClass(touched && !time)} [color-scheme:light]`} value={time} onInput={(e) => setTime(e.currentTarget.value)} />
-				</Field>
+				{!general && (
+					<>
+						<Field label="Planlanan Sefer Tarihi" invalid={touched && !date}>
+							<input aria-label="Planlanan Sefer Tarihi" type="date" min="2023-01-01" class={`${inputClass(touched && !date)} [color-scheme:light]`} value={date} onInput={(e) => setDate(e.currentTarget.value)} />
+						</Field>
+						<Field label="Planlanan Kalkış Saati" invalid={touched && !time}>
+							<input aria-label="Planlanan Kalkış Saati" type="time" class={`${inputClass(touched && !time)} [color-scheme:light]`} value={time} onInput={(e) => setTime(e.currentTarget.value)} />
+						</Field>
+					</>
+				)}
 				<button type="submit" disabled={loading} class="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-md bg-primary px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 disabled:cursor-not-allowed disabled:opacity-60">
 					{loading ? <LoaderCircle class="size-4 animate-spin" aria-hidden="true" /> : <GitCompareArrows class="size-4" aria-hidden="true" />}
-					{loading ? 'Değerlendiriliyor...' : 'Öneriyi Değerlendir'}
+					{loading ? 'Değerlendiriliyor...' : general ? 'Genel Değerlendir' : 'Öneriyi Değerlendir'}
 				</button>
 			</div>
 		</form>
@@ -215,24 +256,39 @@ function Metric({ icon: Icon, label, value, unit, detail, accent }: { icon: type
 	return <div class="bg-white p-5"><div class="flex items-center gap-2 text-muted-foreground"><Icon class="size-4" aria-hidden="true" /><p class="text-xs font-semibold">{label}</p></div><div class={`mt-3 flex items-end gap-2 ${color}`}><strong class="text-3xl font-semibold tracking-tight tabular-nums">{value}</strong><span class="mb-1 text-xs">{unit}</span></div><p class="mt-2 text-xs text-muted-foreground">{detail}</p></div>;
 }
 
-function Evidence({ prediction }: { prediction: StopAdditionPrediction }) {
-	const currentHistory = [
-		{ label: 'Aynı firma, güzergâh, gün ve saat', value: count(prediction.current_route_history_exact_time_weekday_count), Icon: CalendarDays },
-		{ label: 'Aynı firma, güzergâh ve saat', value: count(prediction.current_route_history_exact_time_count), Icon: Clock3 },
-		{ label: 'Aynı firma ve güzergâh', value: count(prediction.current_route_history_company_route_count), Icon: Building2 },
-		{ label: 'Aynı fiziksel güzergâh', value: count(prediction.current_route_history_canonical_route_count), Icon: Network },
-	];
-	const proposedHistory = [
-		{ label: 'Aynı firma, önerilen güzergâh, gün ve saat', value: count(prediction.proposed_route_history_same_company_time_count), Icon: CalendarDays },
-		{ label: 'Aynı firma ve önerilen güzergâh', value: count(prediction.proposed_route_history_same_company_route_count), Icon: Building2 },
-		{ label: 'Tüm firmalarda aynı güzergâh', value: count(prediction.proposed_route_history_all_company_route_count), Icon: Route },
-		{ label: `${count(prediction.proposed_route_history_similar_route_count)} benzer güzergâhtaki seferler`, value: count(prediction.proposed_route_history_similar_trip_count), Icon: Network },
-	];
+function Evidence({ prediction, general }: { prediction: StopAdditionPrediction; general: boolean }) {
+	const currentHistory = general
+		? [
+			{ label: 'Aynı firma ve güzergâh', value: count(prediction.current_route_history_company_route_count), Icon: Building2 },
+			{ label: 'Tüm firmalarda aynı fiziksel güzergâh', value: count(prediction.current_route_history_canonical_route_count), Icon: Network },
+		]
+		: [
+			{ label: 'Aynı firma, güzergâh, gün ve saat', value: count(prediction.current_route_history_exact_time_weekday_count), Icon: CalendarDays },
+			{ label: 'Aynı firma, güzergâh ve saat', value: count(prediction.current_route_history_exact_time_count), Icon: Clock3 },
+			{ label: 'Aynı firma ve güzergâh', value: count(prediction.current_route_history_company_route_count), Icon: Building2 },
+			{ label: 'Aynı fiziksel güzergâh', value: count(prediction.current_route_history_canonical_route_count), Icon: Network },
+		];
+	const proposedHistory = general
+		? [
+			{ label: 'Aynı firma ve önerilen güzergâh', value: count(prediction.proposed_route_history_same_company_route_count), Icon: Building2 },
+			{ label: 'Tüm firmalarda aynı güzergâh', value: count(prediction.proposed_route_history_all_company_route_count), Icon: Route },
+			{ label: `${count(prediction.proposed_route_history_similar_route_count)} benzer güzergâhtaki seferler`, value: count(prediction.proposed_route_history_similar_trip_count), Icon: Network },
+		]
+		: [
+			{ label: 'Aynı firma, önerilen güzergâh, gün ve saat', value: count(prediction.proposed_route_history_same_company_time_count), Icon: CalendarDays },
+			{ label: 'Aynı firma ve önerilen güzergâh', value: count(prediction.proposed_route_history_same_company_route_count), Icon: Building2 },
+			{ label: 'Tüm firmalarda aynı güzergâh', value: count(prediction.proposed_route_history_all_company_route_count), Icon: Route },
+			{ label: `${count(prediction.proposed_route_history_similar_route_count)} benzer güzergâhtaki seferler`, value: count(prediction.proposed_route_history_similar_trip_count), Icon: Network },
+		];
 	return (
 		<section class="animate-enter overflow-hidden rounded-lg border border-border bg-white shadow-sm" aria-labelledby="history-heading">
 			<div class="border-b border-border px-5 py-4">
 				<div class="flex items-center gap-2"><Database class="size-4 text-muted-foreground" aria-hidden="true" /><h2 id="history-heading" class="text-sm font-semibold">Tahminlerin Geçmiş Sefer Dayanağı</h2></div>
-				<p class="mt-1 text-sm text-muted-foreground">İki tahminin hangi geçmiş sefer kayıtlarına dayandığını ayrı ayrı görün. Tüm sayılar planlanan tarihten önceki seferleri gösterir.</p>
+				<p class="mt-1 text-sm text-muted-foreground">
+					{general
+						? 'Genel talep tahminini destekleyen geçmiş seferleri görün. Tarih veya saat ayrımı yapılmaz.'
+						: 'İki tahminin hangi geçmiş sefer kayıtlarına dayandığını ayrı ayrı görün. Tüm sayılar planlanan tarihten önceki seferleri gösterir.'}
+				</p>
 			</div>
 			<div class="grid gap-px bg-border lg:grid-cols-2">
 				<HistoryPanel
@@ -240,7 +296,7 @@ function Evidence({ prediction }: { prediction: StopAdditionPrediction }) {
 					subtitle="Durak eklenmeden önceki talep tahmini"
 					status={currentHistoryStatus(prediction)}
 					items={currentHistory}
-					note={currentHistoryNote(prediction)}
+					note={currentHistoryNote(prediction, general)}
 				/>
 				<HistoryPanel
 					title="Durak eklenmiş güzergâh"
@@ -291,7 +347,7 @@ function ProposedTimeline({ stops, insertedStopId }: { stops: RouteDurak[]; inse
 	return (
 		<section class="animate-enter rounded-lg border border-border bg-white shadow-sm">
 			<div class="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
-				<div><h2 class="text-sm font-semibold">Önerilen durak sırası</h2><p class="mt-1 text-sm text-muted-foreground">Yeni durak, modelin seçtiği en uygun ara konuma yerleştirildi.</p></div>
+				<div><h2 class="text-sm font-semibold">Önerilen durak sırası</h2><p class="mt-1 text-sm text-muted-foreground">Yeni durak, Haversine mesafe artışını en aza indiren ara konuma yerleştirildi.</p></div>
 				<span class="rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">{stops.length} durak</span>
 			</div>
 			<div class="overflow-x-auto p-5">
@@ -485,9 +541,11 @@ function proposedHistoryStatus(prediction: StopAdditionPrediction) {
 	if (similar > 0) return { label: 'Benzer güzergâh verisi var', className: 'bg-sky-100 text-sky-700' };
 	return { label: 'Geçmiş sefer yok', className: 'bg-amber-100 text-amber-800' };
 }
-function currentHistoryNote(prediction: StopAdditionPrediction) {
+function currentHistoryNote(prediction: StopAdditionPrediction, general = false) {
 	if (hasLimitedComparison(prediction)) {
-		return 'Bu güzergâhta firmaya ait geçmiş sefer bulunmadı. Gösterilen mevcut talep, daha geniş tarihsel veri ve model örüntülerinden hesaplandı; doğrudan güzergâh geçmişi değildir.';
+		return general
+			? 'Bu güzergâhta firmaya ait geçmiş sefer bulunmadı. Mevcut talep, aynı fiziksel güzergâhtaki seferlerden veya firmanın genel geçmişinden hesaplandı.'
+			: 'Bu güzergâhta firmaya ait geçmiş sefer bulunmadı. Gösterilen mevcut talep, daha geniş tarihsel veri ve model örüntülerinden hesaplandı; doğrudan güzergâh geçmişi değildir.';
 	}
 	if (prediction.current_route_reliability_reason) return prediction.current_route_reliability_reason;
 	return 'Mevcut güzergâh tahmini, yukarıdaki geçmiş sefer eşleşmelerinden yararlanır.';

@@ -130,14 +130,21 @@ export interface StopAdditionRequest {
 	requested_time: string;
 }
 
+export interface GeneralStopAdditionRequest {
+	firma_id: number;
+	current_guzergah_kodu: number;
+	candidate_stop_uetds_yer_id: number;
+}
+
 export type StopAdditionDecision = 'APPROVE' | 'REVIEW' | 'REJECT';
 
 export interface StopAdditionPrediction {
 	FIRMA_ID: number;
 	CURRENT_GUZERGAH_KODU: number;
 	CANDIDATE_STOP_UETDS_YER_ID: number;
-	REQUESTED_DATE: string;
-	REQUESTED_TIME: string;
+	REQUESTED_DATE: string | null;
+	REQUESTED_TIME: string | null;
+	prediction_mode?: 'GENERAL_SQL_BASELINE';
 	added_stop_uetds_yer_id: number;
 	base_stop_list: number[] | string;
 	proposed_stop_list: number[] | string;
@@ -147,6 +154,7 @@ export interface StopAdditionPrediction {
 	added_haversine_km: number;
 	detour_ratio: number;
 	training_scenario: string;
+	historical_evidence_level?: string;
 	has_same_company_exact_proposed_history: boolean;
 	has_any_exact_proposed_history: boolean;
 	has_similar_route_history: boolean;
@@ -160,6 +168,10 @@ export interface StopAdditionPrediction {
 	proposed_route_history_similar_route_count: number;
 	proposed_route_history_similar_trip_count: number;
 	proposed_route_prediction: number;
+	demand_label?: DemandLabel;
+	prediction_reliability?: Reliability;
+	reliability_reason?: string;
+	best_similarity_with_prior_history?: number | null;
 	current_route_prediction: number | null;
 	predicted_uplift: number | null;
 	current_route_prediction_status: string;
@@ -177,7 +189,7 @@ export interface StopAdditionPrediction {
 	business_decision: StopAdditionDecision;
 	decision_reason: string;
 	decision_score: number;
-	model_evidence_score: number;
+	model_evidence_score: number | null;
 	decision_override: string | null;
 	decision_warnings: string | null;
 	is_company_origin_city: boolean;
@@ -260,6 +272,16 @@ export function predictStopAddition(
 	payload: StopAdditionRequest,
 ): Promise<StopAdditionPrediction> {
 	return jsonFetch<StopAdditionPrediction>(`${API_BASE}/predict-stop-addition`, {
+		method: 'POST',
+		body: JSON.stringify(payload),
+	});
+}
+
+// POST /predict-stop-addition-general
+export function predictGeneralStopAddition(
+	payload: GeneralStopAdditionRequest,
+): Promise<StopAdditionPrediction> {
+	return jsonFetch<StopAdditionPrediction>(`${API_BASE}/predict-stop-addition-general`, {
 		method: 'POST',
 		body: JSON.stringify(payload),
 	});

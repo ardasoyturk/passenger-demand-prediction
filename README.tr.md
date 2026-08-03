@@ -142,9 +142,33 @@ uv run python -m inference.stop_addition.evaluator `
   --output stop_addition_evaluation.csv
 ```
 
-İstek doğrulanır, aday durak Haversine mesafesini en az artıran konuma eklenir,
-önerilen ve mevcut güzergâh talepleri ayrı ayrı tahmin edilir, talep artışı
-hesaplanır ve `APPROVE`/`REVIEW`/`REJECT` kuralları uygulanır.
+Web arayüzünde iki durak ekleme seçeneği vardır:
+
+- **Sefer bazlı** değerlendirme, girilen kalkış tarihini ve saatini kullanır;
+  mevcut durak ekleme talep modeli değiştirilmeden çalışmaya devam eder.
+- **Genel rota** değerlendirmesi yalnızca firma, mevcut güzergâh ve eklenecek
+  durağı ister. Kalkış tarihi, kalkış saati veya talep sınıflandırıcısı
+  kullanmadan geçmiş güzergâh ortalamalarından genel talebi hesaplar.
+
+Her iki seçenekte de istek doğrulanır, aday durak Haversine mesafesini en az
+artıran konuma eklenir, önerilen ve mevcut güzergâh talepleri karşılaştırılır ve
+aynı `APPROVE`/`REVIEW`/`REJECT` kuralları uygulanır. Mesafe artışı, ekleme
+konumu, güzergâh benzerliği, firma çıkış ili onayı, mevcut güzergâhın yeterliliği
+ve geçmiş veri kalitesi kontrolleri iki seçenekte de korunur.
+
+Genel rota talebi hesaplanırken geçmiş veriler şu sırayla kullanılır:
+
+1. aynı firmanın önerilen güzergâhtaki seferleri;
+2. tüm firmaların aynı önerilen güzergâhtaki seferleri;
+3. benzer güzergâhlar;
+4. mevcut güzergâh;
+5. firmanın genel sefer geçmişi.
+
+Gün ve saat kullanmayan CatBoost adayı kullanıma alınmamıştır: doğrulama
+kümesi üzerindeki gruplu MAE değeri `6,1737`, geçmiş ortalamaya dayalı yöntemin
+`5,3551` değerinden daha kötü çıkmış; onay doğruluğu da daha düşük kalmıştır.
+Bu nedenle genel rota seçeneği geçmiş talep tahminini doğrudan kullanır ve talep
+aralığını sabit 10/20/30/43 sınırlarıyla belirler.
 
 ### Önerilen güzergâh tahmini nasıl çalışır?
 
@@ -152,7 +176,8 @@ Durak ekleme özelliği karşı-olgusal bir soruyu yanıtlar: **mevcut bir güze
 aday durak eklenirse beklenen talep ne olur?** Mevcut güzergâh tahminine sabit
 bir yolcu sayısı eklemez.
 
-1. İstek; firma güzergâhını, sefer tarihi ve saatini ve aday durağı belirtir.
+1. İstek firma güzergâhını ve aday durağı belirtir. Sefer bazlı seçenekte tarih
+   ve saat de bulunur; genel rota seçeneğinde bulunmaz.
 2. Güzergâh geometrisi, adayı ek Haversine mesafesini en aza indiren iki ardışık
    durak arasına yerleştirir. Böylece sıralı önerilen durak dizisi, sapma
    mesafesi ve sapma oranı elde edilir.
@@ -298,12 +323,13 @@ Arka yüzü başlatın:
 npm run backend
 ```
 
-OpenAPI arayüzü `http://localhost:8000/docs` adresindedir. Ortak API;
-talep tahmini için `POST /predict`, gün ve saat gerektirmeyen genel rota talep
-tahmini (yalnızca tarihsel ortalama baseline; v4.2/v4.4 modelleri çalıştırılmaz)
-için `POST /predict-general`, tam durak ekleme değerlendirmesi için
-`POST /predict-stop-addition`, `GET /health`, `GET /durak` altında durak
-sorguları ve `GET /route` altında firma güzergâh sorguları sunar.
+OpenAPI arayüzü `http://localhost:8000/docs` adresindedir. Ortak API; sefer bazlı
+talep tahmini için `POST /predict`, genel rota talebi için
+`POST /predict-general`, sefer bazlı durak ekleme değerlendirmesi için
+`POST /predict-stop-addition` ve gün ile saat gerektirmeyen durak ekleme
+değerlendirmesi için `POST /predict-stop-addition-general` uçlarını sunar.
+Ayrıca `GET /health`, `GET /durak` altında durak sorguları ve `GET /route`
+altında firma güzergâh sorguları bulunur.
 
 Başka bir terminalde arayüzü çalıştırın:
 

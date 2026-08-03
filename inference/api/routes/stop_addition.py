@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import math
 from datetime import date, time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-import math
 import pandas as pd
 from catboost import CatBoostRegressor
 from fastapi import APIRouter, HTTPException, Query
@@ -18,6 +18,10 @@ from inference.engine import PROJECT_DIR
 from inference.stop_addition import business_rules
 from inference.stop_addition.contracts import MODEL_PATH, MODEL_SUMMARY_PATH
 from inference.stop_addition.current_route_adapter import add_current_route_predictions
+from inference.stop_addition.general_baseline import (
+    build_general_baseline,
+    finite_float,
+)
 from inference.stop_addition.proposed_route import (
     build_feature_rows,
     load_contract,
@@ -52,6 +56,16 @@ class StopAdditionRequest(BaseModel):
     candidate_stop_uetds_yer_id: int
     requested_date: date
     requested_time: time
+
+
+class GeneralStopAdditionRequest(BaseModel):
+    """Time-independent stop-addition proposal."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    firma_id: int
+    current_guzergah_kodu: int
+    candidate_stop_uetds_yer_id: int
 
 
 class AvailableRoute(BaseModel):
@@ -234,8 +248,9 @@ def available_routes(
 
 
 @lru_cache(maxsize=1)
-def load_stop_addition_contract(
-) -> tuple[CatBoostRegressor, list[str], list[str], str]:
+def load_stop_addition_contract() -> tuple[
+    CatBoostRegressor, list[str], list[str], str
+]:
     """Load and validate the immutable stop-addition model contract once."""
 
     return load_contract(MODEL_PATH, MODEL_SUMMARY_PATH)
@@ -246,6 +261,227 @@ def _finite_float(value: Any) -> float | None:
         return None
     result = float(value)
     return result if math.isfinite(result) else None
+
+
+def _general_reliability(source: str, count: int) -> tuple[str, str]:
+    if count <= 0:
+        return "NO_HISTORY", "Kullanılabilir geçmiş talep verisi bulunamadı."
+    if count < 10:
+        level = "UNSAFE"
+    elif count < 30:
+        level = "MEDIUM" if source == "SAME_COMPANY_EXACT" else "LOW"
+    else:
+        level = "HIGH" if source == "SAME_COMPANY_EXACT" else "MEDIUM"
+    source_labels = {
+        "SAME_COMPANY_EXACT": "Aynı firma ve önerilen güzergâh",
+        "ALL_COMPANY_EXACT": "Tüm firmalarda aynı önerilen güzergâh",
+        "SIMILAR_ROUTE": "Benzer güzergâhlar",
+        "CURRENT_ROUTE": "Mevcut güzergâh",
+        "CURRENT_ROUTE_SAME_COMPANY": "Aynı firma ve mevcut güzergâh",
+        "CURRENT_ROUTE_ALL_COMPANY": "Tüm firmalarda aynı mevcut güzergâh",
+        "COMPANY": "Firma geneli",
+    }
+    label = source_labels.get(source, "Geçmiş seferler")
+    return level, f"{label} için {count} geçmiş sefer kullanıldı."
+
+
+def _baseline_source_count(row: pd.Series, source: str) -> int:
+    if source == "SAME_COMPANY_EXACT":
+        return int(row["proposed_same_company_prior_trip_count"])
+    if source == "ALL_COMPANY_EXACT":
+        return int(row["proposed_all_company_prior_trip_count"])
+    if source == "SIMILAR_ROUTE":
+        same_company = int(row["similar_same_company_prior_trip_count"])
+        return (
+            same_company
+            if same_company > 0
+            else int(row["similar_all_company_prior_trip_count"])
+        )
+    if source == "CURRENT_ROUTE":
+        same_company = int(row["base_same_company_prior_trip_count"])
+        return (
+            same_company
+            if same_company > 0
+            else int(row["base_all_company_prior_trip_count"])
+        )
+    if source == "COMPANY":
+        return int(row["company_prior_trip_count"])
+    return 0
+
+
+def _general_stop_addition_frame(
+    proposal: GeneralStopAdditionRequest,
+) -> pd.DataFrame:
+    """Use the existing geography validator without exposing a fake schedule."""
+
+    return normalise_request_columns(
+        pd.DataFrame(
+            [
+                {
+                    "FIRMA_ID": proposal.firma_id,
+                    "CURRENT_GUZERGAH_KODU": proposal.current_guzergah_kodu,
+                    "CANDIDATE_STOP_UETDS_YER_ID": (
+                        proposal.candidate_stop_uetds_yer_id
+                    ),
+                    "REQUESTED_DATE": None,
+                    "REQUESTED_TIME": None,
+                }
+            ]
+        )
+    )
+
+
+@router.post(
+    "/predict-stop-addition-general",
+    summary="Evaluate a stop addition without a departure date or time",
+)
+def predict_general_stop_addition(
+    proposal: GeneralStopAdditionRequest,
+    db: Database,
+) -> dict[str, Any]:
+    """Use only the evaluated general SQL baseline and fixed demand bands."""
+
+    frame = _general_stop_addition_frame(proposal)
+    try:
+        routes, canonical_routes, coordinates, place_info, companies = (
+            load_reference_data(db)
+        )
+        targets, _pairs, similarities, output_rows = validate_and_build_requests(
+            frame,
+            db,
+            routes,
+            canonical_routes,
+            coordinates,
+            place_info,
+            companies,
+            general_mode=True,
+        )
+        output = output_rows[0]
+        validation_error = output.get("prediction_error")
+        if validation_error:
+            status_code = 404 if validation_error in NOT_FOUND_ERRORS else 422
+            if validation_error not in NOT_FOUND_ERRORS | INVALID_REQUEST_ERRORS:
+                status_code = 500
+            raise HTTPException(status_code=status_code, detail=validation_error)
+
+        baseline_rows = build_general_baseline(db, targets, similarities)
+        if len(baseline_rows) != 1:
+            raise RuntimeError(
+                f"Expected one general SQL baseline row, created {len(baseline_rows)}."
+            )
+        baseline = baseline_rows.iloc[0]
+        prediction = finite_float(baseline["general_baseline_prediction"])
+        current_prediction = finite_float(baseline["general_current_route_prediction"])
+        source = str(baseline["general_baseline_source"])
+        source_count = _baseline_source_count(baseline, source)
+        reliability, reliability_reason = _general_reliability(source, source_count)
+        current_source = str(baseline["general_current_route_source"])
+        current_count = int(baseline["base_same_company_prior_trip_count"])
+        if current_count <= 0:
+            current_count = int(baseline["base_all_company_prior_trip_count"])
+        if current_count <= 0:
+            current_count = int(baseline["company_prior_trip_count"])
+        current_reliability, current_reason = _general_reliability(
+            current_source, current_count
+        )
+
+        same_company_count = int(baseline["proposed_same_company_prior_trip_count"])
+        all_company_count = int(baseline["proposed_all_company_prior_trip_count"])
+        similar_route_count = int(baseline["similar_routes_with_prior_history_count"])
+        similar_trip_count = int(baseline["similar_all_company_prior_trip_count"])
+        prediction_ok = prediction is not None
+        current_ok = current_prediction is not None
+        output.update(
+            {
+                "prediction_mode": "GENERAL_SQL_BASELINE",
+                "REQUESTED_DATE": None,
+                "REQUESTED_TIME": None,
+                "training_scenario": str(baseline["training_scenario"]),
+                "historical_evidence_level": str(baseline["historical_evidence_level"]),
+                "has_same_company_exact_proposed_history": same_company_count > 0,
+                "has_any_exact_proposed_history": all_company_count > 0,
+                "has_similar_route_history": similar_route_count > 0,
+                "current_route_expected_demand_proxy": current_prediction,
+                "proposed_route_hierarchical_baseline": prediction,
+                "proposed_route_baseline_source": source,
+                "proposed_route_history_same_company_time_count": 0,
+                "proposed_route_history_same_company_route_count": (same_company_count),
+                "proposed_route_history_all_company_time_count": 0,
+                "proposed_route_history_all_company_route_count": (all_company_count),
+                "proposed_route_history_similar_route_count": similar_route_count,
+                "proposed_route_history_similar_trip_count": similar_trip_count,
+                "best_similarity_with_prior_history": _finite_float(
+                    baseline["best_similarity_with_prior_history"]
+                ),
+                "proposed_route_prediction": prediction,
+                "demand_label": (
+                    str(baseline["general_demand_label"]) if prediction_ok else None
+                ),
+                "prediction_reliability": reliability,
+                "reliability_reason": reliability_reason,
+                "current_route_prediction": current_prediction,
+                "predicted_uplift": (
+                    prediction - current_prediction
+                    if prediction_ok and current_ok
+                    else None
+                ),
+                "current_route_prediction_status": (
+                    "SUCCESS" if current_ok else "ERROR"
+                ),
+                "current_route_prediction_error": (
+                    None if current_ok else "NO_GENERAL_CURRENT_ROUTE_EVIDENCE"
+                ),
+                "current_route_reliability": current_reliability,
+                "current_route_reliability_reason": current_reason,
+                "current_route_baseline_source": current_source,
+                "current_route_history_exact_time_weekday_count": 0,
+                "current_route_history_exact_time_count": 0,
+                "current_route_history_company_route_count": int(
+                    baseline["base_same_company_prior_trip_count"]
+                ),
+                "current_route_history_canonical_time_weekday_count": 0,
+                "current_route_history_canonical_route_count": int(
+                    baseline["base_all_company_prior_trip_count"]
+                ),
+                "prediction_status": "SUCCESS" if prediction_ok else "ERROR",
+                "prediction_error": (
+                    None if prediction_ok else "NO_GENERAL_DEMAND_EVIDENCE"
+                ),
+            }
+        )
+
+        city_pair = (
+            companies.get(proposal.firma_id),
+            place_info[proposal.candidate_stop_uetds_yer_id]["il_id"],
+        )
+        decision = business_rules.decide(pd.Series(output), city_pair)
+        warnings = business_rules.decision_warnings(pd.Series(output))
+        output.update(
+            {
+                "business_decision": decision[0],
+                "decision_reason": decision[1],
+                "decision_score": decision[2],
+                "model_evidence_score": decision[3],
+                "decision_override": decision[4],
+                "decision_warnings": "|".join(warnings) if warnings else None,
+                "is_company_origin_city": (
+                    city_pair[0] is not None
+                    and city_pair[1] is not None
+                    and city_pair[0] == city_pair[1]
+                ),
+                "company_origin_il_id": city_pair[0],
+                "added_stop_il_id": city_pair[1],
+            }
+        )
+        output.pop("_input_row_number", None)
+        return output
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"General stop-addition inference failed: {exc}",
+        ) from exc
 
 
 @router.post(
@@ -305,9 +541,7 @@ def predict_stop_addition(
         feature_row = feature_rows.iloc[0]
         missing = [name for name in features if name not in feature_rows.columns]
         if missing:
-            raise RuntimeError(
-                f"Inference failed to create model features: {missing}"
-            )
+            raise RuntimeError(f"Inference failed to create model features: {missing}")
         matrix = feature_rows.loc[:, features].copy()
         for column in categorical:
             matrix[column] = (
@@ -326,9 +560,7 @@ def predict_stop_addition(
                 "has_any_exact_proposed_history": bool(
                     feature_row["inference_has_any_exact"]
                 ),
-                "has_similar_route_history": bool(
-                    feature_row["inference_has_similar"]
-                ),
+                "has_similar_route_history": bool(feature_row["inference_has_similar"]),
                 "current_route_expected_demand_proxy": _finite_float(
                     feature_row["current_route_expected_demand_proxy"]
                 ),
@@ -375,8 +607,8 @@ def predict_stop_addition(
         )
         add_current_route_predictions(output_rows, [0], artifacts)
         if output["current_route_prediction_status"] == "SUCCESS":
-            output["predicted_uplift"] = (
-                prediction - float(output["current_route_prediction"])
+            output["predicted_uplift"] = prediction - float(
+                output["current_route_prediction"]
             )
 
         city_pair = (

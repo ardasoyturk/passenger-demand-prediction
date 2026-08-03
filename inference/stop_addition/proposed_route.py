@@ -304,6 +304,8 @@ def validate_and_build_requests(
     coordinates: dict[int, tuple[float | None, float | None]],
     place_info: dict[int, dict[str, Any]],
     companies: dict[int, int | None],
+    *,
+    general_mode: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, list[dict[str, Any]]]:
     valid: list[dict[str, Any]] = []
     pairs: list[dict[str, Any]] = []
@@ -329,8 +331,8 @@ def validate_and_build_requests(
                 raw["CANDIDATE_STOP_UETDS_YER_ID"],
                 "CANDIDATE_STOP_UETDS_YER_ID",
             )
-            target_date = parse_date(raw["REQUESTED_DATE"])
-            target_time = parse_time(raw["REQUESTED_TIME"])
+            target_date = None if general_mode else parse_date(raw["REQUESTED_DATE"])
+            target_time = None if general_mode else parse_time(raw["REQUESTED_TIME"])
             if firma_id not in companies:
                 raise ValueError("COMPANY_NOT_FOUND")
             route = routes.get((firma_id, route_code))
@@ -405,16 +407,18 @@ def validate_and_build_requests(
                     proposed_stops, coordinates
                 ),
             }
-            target_ts = pd.Timestamp(
-                f"{target_date.date()} {target_time}"
+            target_ts = (
+                None
+                if general_mode
+                else pd.Timestamp(f"{target_date.date()} {target_time}")
             )
             valid.append(
                 {
                     "training_row_id": pair_id,
                     "pair_id": pair_id,
                     "SEFER_ID": None,
-                    "target_date": target_date.date(),
-                    "target_time": target_ts.time(),
+                    "target_date": None if general_mode else target_date.date(),
+                    "target_time": None if general_mode else target_ts.time(),
                     "target_variant_guzergah_kodu": None,
                     "FIRMA_ID": firma_id,
                     **{k: v for k, v in pair.items() if k != "pair_id"},
@@ -423,14 +427,24 @@ def validate_and_build_requests(
                         company_origin_il_id is not None
                         and company_origin_il_id == place["il_id"]
                     ),
-                    "iso_weekday": target_date.isoweekday(),
-                    "half_hour_bucket": target_ts.hour * 2 + target_ts.minute // 30,
-                    "year": target_date.year,
-                    "month": target_date.month,
-                    "day_of_month": target_date.day,
-                    "departure_hour": target_ts.hour,
-                    "departure_minute": target_ts.minute,
-                    "is_weekend": target_date.isoweekday() in (6, 7),
+                    "iso_weekday": (
+                        None if general_mode else target_date.isoweekday()
+                    ),
+                    "half_hour_bucket": (
+                        None
+                        if general_mode
+                        else target_ts.hour * 2 + target_ts.minute // 30
+                    ),
+                    "year": None if general_mode else target_date.year,
+                    "month": None if general_mode else target_date.month,
+                    "day_of_month": None if general_mode else target_date.day,
+                    "departure_hour": None if general_mode else target_ts.hour,
+                    "departure_minute": None if general_mode else target_ts.minute,
+                    "is_weekend": (
+                        None
+                        if general_mode
+                        else target_date.isoweekday() in (6, 7)
+                    ),
                     "data_split": "INFERENCE",
                     "target_passenger_count": None,
                 }
@@ -452,7 +466,9 @@ def validate_and_build_requests(
                     "CURRENT_GUZERGAH_KODU": route_code,
                     "CANDIDATE_STOP_UETDS_YER_ID": candidate,
                     "added_stop_uetds_yer_id": candidate,
-                    "REQUESTED_DATE": str(target_date.date()),
+                    "REQUESTED_DATE": (
+                        None if general_mode else str(target_date.date())
+                    ),
                     "REQUESTED_TIME": target_time,
                     "base_stop_list": stop_list_json(base_stops),
                     "proposed_stop_list": stop_list_json(proposed_stops),

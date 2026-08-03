@@ -142,9 +142,32 @@ uv run python -m inference.stop_addition.evaluator `
   --output stop_addition_evaluation.csv
 ```
 
-It validates the request, inserts the proposed stop at the minimum-Haversine
-detour position, predicts proposed and current demand, calculates uplift, and
-applies the `APPROVE`/`REVIEW`/`REJECT` rules.
+The web demo offers two stop-addition modes:
+
+- **Scheduled trip** uses the requested departure date and time and keeps the
+  existing stop-addition demand model unchanged.
+- **General route** needs only the company, current route, and candidate stop.
+  It estimates typical demand from historical route averages without using a
+  departure date, departure time, or demand classifier.
+
+Both modes validate the request, insert the proposed stop at the
+minimum-Haversine detour position, compare proposed and current demand, and
+apply the same `APPROVE`/`REVIEW`/`REJECT` rules. Distance increase, insertion
+position, route similarity, company-origin approval, current-route viability,
+and evidence-quality checks remain active in both modes.
+
+For general-route demand, historical evidence is used in this order:
+
+1. same company on the exact proposed route;
+2. all companies on the exact proposed route;
+3. similar routes;
+4. the current route;
+5. the company's overall history.
+
+The time-independent CatBoost candidate was not promoted: validation grouped
+MAE was `6.1737` versus `5.3551` for the historical estimator, and approval
+accuracy was also lower. The general-route mode therefore uses the historical
+estimate directly and assigns demand bands with the fixed 10/20/30/43 limits.
 
 ### How proposed-route prediction works
 
@@ -152,8 +175,8 @@ Stop addition answers a counterfactual question: **what demand should we expect
 if a candidate stop is inserted into an existing route?** It does not simply add
 a fixed number of passengers to the current-route prediction.
 
-1. The request identifies the company route, departure date and time, and
-   candidate stop.
+1. The request identifies the company route and candidate stop. Scheduled mode
+   also includes departure date and time; general mode does not.
 2. The route geometry places that stop between the adjacent stops that produce
    the smallest additional Haversine distance. This creates the proposed ordered
    stop sequence and measures its detour distance and ratio.
@@ -300,11 +323,11 @@ npm run backend
 ```
 
 Open `http://localhost:8000/docs` for the OpenAPI interface. The shared API
-exposes demand inference at `POST /predict`, time-independent general route
-demand (historical baseline only, no v4.2/v4.4 models) at
-`POST /predict-general`, complete stop-addition evaluation
-at `POST /predict-stop-addition`, `GET /health`, stop lookup under
-`GET /durak`, and company-route lookup under `GET /route`.
+exposes scheduled demand inference at `POST /predict`, general route demand at
+`POST /predict-general`, scheduled stop-addition evaluation at
+`POST /predict-stop-addition`, and time-independent stop-addition evaluation at
+`POST /predict-stop-addition-general`. It also provides `GET /health`, stop
+lookup under `GET /durak`, and company-route lookup under `GET /route`.
 
 In a second terminal, install packages and start the frontend:
 
