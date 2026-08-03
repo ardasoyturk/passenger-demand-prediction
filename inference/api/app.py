@@ -7,12 +7,21 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastmcp.utilities.lifespan import combine_lifespans
 
 from inference.api.depends import Artifacts, Database
-from inference.api.routes import durak, gateway, predict, predict_general, route, stop_addition
+from inference.api.mcp import mcp_app, set_artifacts
+from inference.api.routes import (
+    durak,
+    gateway,
+    predict,
+    predict_general,
+    route,
+    stop_addition,
+)
+from inference.api.routes.stop_addition import load_stop_addition_contract
 from inference.api.schemas import HealthResponse
 from inference.engine import load_frozen_artifacts
-from inference.api.routes.stop_addition import load_stop_addition_contract
 
 
 def _cors_origins() -> list[str]:
@@ -24,15 +33,17 @@ def _cors_origins() -> list[str]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.artifacts = load_frozen_artifacts()
+    set_artifacts(app.state.artifacts)
     load_stop_addition_contract()
     yield
+    set_artifacts(None)
     del app.state.artifacts
 
 
 app = FastAPI(
     title="Passenger Demand Demo API",
     version="1.0.0",
-    lifespan=lifespan,
+    lifespan=combine_lifespans(lifespan, mcp_app.lifespan),
 )
 
 origins = _cors_origins()
@@ -50,6 +61,7 @@ app.include_router(durak.router)
 app.include_router(route.router)
 app.include_router(stop_addition.router)
 app.include_router(gateway.router)
+app.mount("/mcp", mcp_app)
 
 
 @app.get("/health", response_model=HealthResponse, tags=["system"])

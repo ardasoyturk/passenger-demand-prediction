@@ -340,6 +340,18 @@ npm run frontend
 
 Vite, `/api` isteklerini yerel FastAPI sunucusuna yönlendirir. Üretim arayüz paketini `inference/frontend/dist/` altında oluşturmak için `npm run frontend:build` kullanın.
 
+`/chat` sayfasının tarayıcıda kullanılabilen yapılandırması (sağlayıcı, model,
+LLM temel adresi ve MCP uç noktası)
+`inference/frontend/src/pages/Chat/config.ts` içinde bulunur. Bu dosya arayüz
+paketine dahil edildiği için API anahtarı içermemelidir.
+
+`AI_GATEWAY_API_KEY` yalnızca FastAPI arka yüzünde yapılandırılmalıdır;
+örneğin `npm run backend` komutunun kullandığı depo kökündeki `.env` dosyasında.
+FastAPI, `/api/gateway/language-model` isteklerini Vercel AI Gateway'e iletir
+ve anahtarı yalnızca sunucu tarafında ekler. Anahtar hiçbir zaman tarayıcıya
+gönderilmez. Kimlik bilgisi gerektiren OpenAI-uyumlu bir uç nokta için de API
+anahtarını arayüz yapılandırmasına koymak yerine arka yüz aktarım katmanı kullanın.
+
 ## Gelecekteki değişiklikler için kurallar
 
 - Büyük tarama, birleştirme, gruplama ve yüzdelik hesaplarını DuckDB'de yapın; pandas'a yalnızca tamamlanmış model matrisini alın.

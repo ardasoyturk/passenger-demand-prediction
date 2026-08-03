@@ -8,6 +8,7 @@ dependencies = [
     "catboost>=1.2.10",
     "duckdb>=1.5.4",
     "fastapi>=0.115.0",
+    "fastmcp>=3.0.0,<5",
     "matplotlib>=3.11.0",
     "pandas>=3.0.3",
     "scikit-learn>=1.9.0",

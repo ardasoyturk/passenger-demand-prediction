@@ -1,11 +1,12 @@
-import { streamText } from 'ai';
+import { stepCountIs, streamText } from 'ai';
 import type { ModelMessage } from 'ai';
 import { Bot, Check, Copy, LoaderCircle, Send, Sparkles, Square, Trash2, TriangleAlert } from 'lucide-preact';
 import type { TargetedEvent } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Markdown } from '../../components/Markdown';
-import { chatModel, LLM_MODEL, LLM_PROVIDER } from './llm';
-import { SYSTEM_PROMPT } from './system-prompt';
+import { chatModel } from './llm';
+import { createPredictionMCPClient } from './mcp';
+import { getSystemPrompt } from './system-prompt';
 
 interface ChatMessage {
 	id: string;
@@ -16,6 +17,7 @@ interface ChatMessage {
 const SUGGESTIONS: string[] = [
 	'Talep etiketleri (çok düşük, düşük, orta, yüksek) ne anlama geliyor?',
 	'42185 firmasının 110926 güzergâhındaki Cuma 13:00 seferini değerlendir.',
+	'42185 firmasının 62182 güzergâhına 151 numaralı durağı Cuma 13:00 için eklersek etkisini tahmin et.',
 	'Durak eklemenin talep ve mesafe üzerindeki etkisini nasıl yorumlamalıyım?',
 	'Eşik olasılıkları ile beklenen talep arasındaki farkı açıkla.',
 ];
@@ -63,11 +65,15 @@ export function Chat() {
 		pinnedRef.current = true;
 		const controller = new AbortController();
 		abortRef.current = controller;
+		let mcpClient: Awaited<ReturnType<typeof createPredictionMCPClient>> | undefined;
 		try {
-			console.log(SYSTEM_PROMPT);
+			mcpClient = await createPredictionMCPClient();
+			const tools = await mcpClient.tools();
 			const { textStream } = streamText({
 				model: chatModel,
-				instructions: SYSTEM_PROMPT,
+				instructions: getSystemPrompt(),
+				tools,
+				stopWhen: stepCountIs(5),
 				messages: history
 					.filter((m) => m.content.trim() !== '')
 					.map<ModelMessage>((m) => (m.role === 'user'
@@ -87,6 +93,7 @@ export function Chat() {
 				setMessages((prev) => prev.filter((m) => m.id !== assistantId || m.content.trim() !== ''));
 			}
 		} finally {
+			await mcpClient?.close();
 			setStreaming(false);
 			abortRef.current = null;
 			textareaRef.current?.focus();

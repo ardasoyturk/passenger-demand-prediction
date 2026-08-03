@@ -15,17 +15,20 @@ npm run frontend
 
 The development server is available at `http://localhost:5173` and proxies `/api` requests to FastAPI at `http://localhost:8000`.
 
-The `/chat` page uses Vercel AI Gateway by default. Configure the frontend before starting Vite:
+The `/chat` page uses Vercel AI Gateway by default. Configure its browser-safe
+settings—provider, model, LLM base URL, and MCP endpoint—in
+`src/pages/Chat/config.ts`. This file is bundled into the frontend, so it must
+never contain an API key.
 
-```powershell
-$env:VITE_LLM_PROVIDER="gateway"
-$env:VITE_LLM_MODEL="openai/gpt-5-mini"
-$env:AI_GATEWAY_API_KEY="your-gateway-key"
-```
+Set `AI_GATEWAY_API_KEY` only for the FastAPI backend, for example in the
+repository-root `.env` used by `npm run backend`. FastAPI relays
+`/api/gateway/language-model` to Vercel AI Gateway and injects the key
+server-side; the browser never receives it.
 
-Start the FastAPI server in the same environment. It relays `/api/gateway/language-model` to Vercel AI Gateway and injects `AI_GATEWAY_API_KEY` server-side; the key is never included in the frontend bundle.
-
-For a future OpenAI-compatible endpoint, use `VITE_LLM_PROVIDER="openai-compatible"`, then set `VITE_LLM_BASE_URL`, `VITE_LLM_MODEL`, and optionally `VITE_LLM_API_KEY`.
+To use an OpenAI-compatible endpoint, change `provider` and
+`openAICompatibleBaseUrl` in `src/pages/Chat/config.ts`. Use a backend relay
+for endpoints that require credentials; do not put credentials in frontend
+configuration.
 
 Build or preview the production bundle with:
 
