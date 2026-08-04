@@ -1,6 +1,6 @@
 import { Building2, CalendarDays, Clock3, Database, Network, Route } from 'lucide-preact';
 import type { ReliabilityEvidence, SimplifiedPrediction } from '../api';
-import { DemandStatus, ReliabilityStatus } from './DemandLabel';
+import { PredictionAssessment } from './DemandLabel';
 import { baselineExplanation } from '../lib/baseline';
 
 export function PredictionResult({ prediction }: { prediction: SimplifiedPrediction }) {
@@ -22,16 +22,16 @@ export function PredictionResult({ prediction }: { prediction: SimplifiedPredict
 					<span class="mb-1 text-sm text-muted-foreground">yolcu</span>
 				</div>
 				<div class="mt-4 flex items-center justify-between border-t border-border pt-4 text-sm">
-					<span class="text-muted-foreground">Baseline Tahmin: {baseline_demand.toFixed(1)}</span>
+					<span class="text-muted-foreground">Referans tahmin: {baseline_demand.toFixed(1)}</span>
 					<span class={delta >= 0 ? 'font-medium text-emerald-600' : 'font-medium text-orange-600'}>{delta >= 0 ? '+' : ''}{delta.toFixed(1)}</span>
 				</div>
 			</div>
 
-			<DemandStatus label={demand_label} />
-
-			<div class="h-full lg:col-span-2">
-				<ReliabilityStatus level={reliability} reason={reliability_reason} />
-			</div>
+			<PredictionAssessment
+				demandLabel={demand_label}
+				reliability={reliability}
+				reason={reliability_reason}
+			/>
 
 			<ReliabilityEvidenceCard evidence={reliability_evidence} />
 
@@ -68,7 +68,7 @@ function ReliabilityEvidenceCard({ evidence }: { evidence: ReliabilityEvidence }
 					<p class="mt-1 text-sm leading-relaxed text-muted-foreground">Bu sayılar, tahmini destekleyebilecek benzer geçmiş sefer eşleşmelerini gösterir. Önerilen sefer tarihi ve sonrasındaki kayıtlar dahil edilmez.</p>
 				</div>
 				<div class="rounded-md bg-muted px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-					<span class="font-medium text-foreground">Baseline hesabı: </span>
+					<span class="font-medium text-foreground">Referans hesabı: </span>
 					{baselineExplanation(evidence)}
 				</div>
 			</div>

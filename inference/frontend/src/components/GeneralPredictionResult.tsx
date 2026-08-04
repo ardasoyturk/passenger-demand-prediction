@@ -13,7 +13,7 @@ export function GeneralPredictionResult({ prediction }: { prediction: GeneralPre
 					<span class="mb-1 text-sm text-muted-foreground">yolcu</span>
 				</div>
 				<div class="mt-4 flex items-center justify-between border-t border-border pt-4 text-sm">
-					<span class="text-muted-foreground">Tarihsel ortalama</span>
+					<span class="text-muted-foreground">Geçmiş sefer sayısı</span>
 					<span class="font-medium text-foreground tabular-nums">{prediction.baseline_trip_count.toLocaleString('tr-TR')} sefer</span>
 				</div>
 			</div>
@@ -47,7 +47,7 @@ function GeneralEvidenceCard({ prediction }: { prediction: GeneralPrediction }) 
 					<p class="mt-1 text-sm leading-relaxed text-muted-foreground">Bu sayılar, tahmini destekleyen geçmiş sefer eşleşmelerini gösterir. Genel tahmin, gün ve saat ayrımı yapmadan tüm geçmiş seferlerin ortalamasıdır.</p>
 				</div>
 				<div class="rounded-md bg-muted px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-					<span class="font-medium text-foreground">Baseline hesabı: </span>
+					<span class="font-medium text-foreground">Referans hesabı: </span>
 					{baselineExplanation(prediction)}
 				</div>
 			</div>

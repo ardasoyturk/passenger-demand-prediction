@@ -80,6 +80,76 @@ def _city_name(il_id: int | None) -> str | None:
     return CITY_NAMES_BY_ID.get(il_id) if il_id is not None else None
 
 
+def _with_stop_city_names(value: object) -> object:
+    """Add province names to stop-shaped results without altering DB contracts."""
+    if isinstance(value, list):
+        return [_with_stop_city_names(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    result = {key: _with_stop_city_names(item) for key, item in value.items()}
+    il_id = result.get("il_id")
+    if isinstance(il_id, int):
+        result["il_adi"] = _city_name(il_id)
+    return result
+
+
+def _stop_ids(value: object) -> list[int]:
+    """Normalize the proposed stop list returned by the prediction service."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(value, list):
+        return []
+
+    stop_ids: list[int] = []
+    for item in value:
+        if isinstance(item, bool):
+            continue
+        try:
+            stop_id = int(item)
+        except (TypeError, ValueError):
+            continue
+        stop_ids.append(stop_id)
+    return stop_ids
+
+
+def _ordered_route_stops(
+    db: duckdb.DuckDBPyConnection, stop_ids: list[int]
+) -> list[dict]:
+    """Resolve an ordered ID list to the route-stop shape used by the map UI."""
+    if not stop_ids:
+        return []
+    placeholders = ", ".join("?" for _ in stop_ids)
+    rows = db.execute(
+        f"SELECT {DURAK_SELECT} FROM ats_yer WHERE id IN ({placeholders})",
+        stop_ids,
+    ).fetchall()
+    stops_by_id = {
+        int(row[0]): dict(zip(DURAK_COLUMNS, row, strict=True)) for row in rows
+    }
+    route_stops: list[dict] = []
+    for order, stop_id in enumerate(stop_ids, start=1):
+        stop = stops_by_id.get(stop_id)
+        if stop is None:
+            continue
+        route_stops.append(
+            {
+                "sira": order,
+                "durak_id": stop_id,
+                "durak_adi": stop["uetds_adi"],
+                "kisa_adi": stop["kisa_adi"],
+                "il_id": stop["il_id"],
+                "il_adi": _city_name(stop["il_id"]),
+                "ilce_id": stop["ilce_id"],
+                "enlem": stop["enlem"],
+                "boylam": stop["boylam"],
+            }
+        )
+    return route_stops
+
+
 @mcp.tool
 def list_routes_for_company(firma_id: int) -> dict:
     """List every known route code for a company with origin/destination names.
@@ -102,7 +172,7 @@ def get_company_route_details(firma_id: int, guzergah_kodu: int) -> dict:
     """
     with _tool_db() as db:
         result = get_route(firma_id, guzergah_kodu, db)
-    return result.model_dump(mode="json")
+    return _with_stop_city_names(result.model_dump(mode="json"))
 
 
 @mcp.tool
@@ -132,7 +202,7 @@ def get_canonical_route_details(canonical_guzergah_id: int) -> dict:
             # callers that selected it to recover through the general lookup.
             return get_route_details(canonical_guzergah_id)
         detail = get_route(int(aliases[0][0]), int(aliases[0][1]), db)
-    return {
+    return _with_stop_city_names({
         "canonical_guzergah_id": canonical_guzergah_id,
         "company_routes": [
             {
@@ -143,7 +213,7 @@ def get_canonical_route_details(canonical_guzergah_id: int) -> dict:
             for row in aliases
         ],
         "duraklar": [stop.model_dump(mode="json") for stop in detail.duraklar],
-    }
+    })
 
 
 @mcp.tool
@@ -207,7 +277,7 @@ def get_route_details(guzergah_id: int) -> dict:
             firma_id, guzergah_kodu = resolved_company_routes.pop()
             detail = get_route(firma_id, guzergah_kodu, db)
 
-    return {
+    return _with_stop_city_names({
         "input_guzergah_id": guzergah_id,
         "matched_canonical_guzergah_id": guzergah_id if canonical_aliases else None,
         "canonical_company_routes": [
@@ -241,7 +311,7 @@ def get_route_details(guzergah_id: int) -> dict:
         "requires_company_selection": len(company_matches) > 1,
         "has_identifier_type_ambiguity": bool(canonical_aliases and company_matches),
         "route": detail.model_dump(mode="json") if detail is not None else None,
-    }
+    })
 
 
 @mcp.tool
@@ -253,7 +323,7 @@ def get_stop_details(durak_id: int) -> dict:
     """
     with _tool_db() as db:
         result = get_durak(durak_id, db)
-    return result.model_dump(mode="json")
+    return _with_stop_city_names(result.model_dump(mode="json"))
 
 
 @mcp.tool
@@ -267,7 +337,6 @@ def search_stops(query: str, limit: int = 20) -> list[dict]:
     if not normalized:
         raise ValueError("Stop search query cannot be empty")
     bounded_limit = max(1, min(limit, 50))
-    pattern = f"%{normalized.casefold()}%"
     with _tool_db() as db:
         rows = db.execute(
             f"""
@@ -275,18 +344,20 @@ def search_stops(query: str, limit: int = 20) -> list[dict]:
                 {DURAK_SELECT}
             FROM ats_yer
             WHERE CAST(id AS VARCHAR) = ?
-               OR contains(lower(coalesce(uetds_kodu, '')), ?)
-               OR contains(lower(coalesce(uetds_adi, '')), ?)
-               OR contains(lower(coalesce(kisa_adi, '')), ?)
+               OR contains(lower(coalesce(uetds_kodu, '')), lower(?))
+               OR contains(lower(coalesce(uetds_adi, '')), lower(?))
+               OR contains(lower(coalesce(kisa_adi, '')), lower(?))
             ORDER BY
                 CASE WHEN CAST(id AS VARCHAR) = ? THEN 0 ELSE 1 END,
                 uetds_adi NULLS LAST,
                 id
             LIMIT ?
             """,
-            [normalized, pattern[1:-1], pattern[1:-1], pattern[1:-1], normalized, bounded_limit],
+            [normalized, normalized, normalized, normalized, normalized, bounded_limit],
         ).fetchall()
-    return [dict(zip(DURAK_COLUMNS, row, strict=True)) for row in rows]
+    return _with_stop_city_names(
+        [dict(zip(DURAK_COLUMNS, row, strict=True)) for row in rows]
+    )
 
 
 @mcp.tool
@@ -456,8 +527,17 @@ def get_company_route_history_summary(firma_id: int, guzergah_kodu: int) -> dict
 
 
 @mcp.tool
-def list_routes_serving_stop(durak_id: int, limit: int = 50) -> list[dict]:
-    """List company routes whose ordered canonical stop list includes a stop."""
+def find_routes_by_origin_destination(
+    kalkis_durak_id: int,
+    varis_durak_id: int,
+    firma_id: int | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    """Find routes whose first and last stops exactly match two stop IDs.
+
+    Use this for origin-to-destination route discovery after resolving natural
+    language stop names with ``search_stops``. Optionally restrict to a company.
+    """
     bounded_limit = max(1, min(limit, 200))
     with _tool_db() as db:
         rows = db.execute(
@@ -467,23 +547,154 @@ def list_routes_serving_stop(durak_id: int, limit: int = 50) -> list[dict]:
                 company.unvan,
                 route.guzergah_kodu::INTEGER,
                 route.canonical_guzergah_id,
-                list_position(route.duraklar, ?)::INTEGER AS stop_order,
+                route.duraklar[1]::INTEGER AS kalkis_durak_id,
+                departure.uetds_adi AS kalkis_durak_adi,
+                route.duraklar[len(route.duraklar)]::INTEGER AS varis_durak_id,
+                arrival.uetds_adi AS varis_durak_adi,
                 len(route.duraklar)::INTEGER AS route_stop_count
             FROM guzergah_canonical AS route
             LEFT JOIN ats_firma AS company ON company.firma_id = route.firma_id
-            WHERE list_contains(route.duraklar, ?)
+            LEFT JOIN ats_yer AS departure ON departure.id = route.duraklar[1]
+            LEFT JOIN ats_yer AS arrival
+              ON arrival.id = route.duraklar[len(route.duraklar)]
+            WHERE route.duraklar[1] = ?
+              AND route.duraklar[len(route.duraklar)] = ?
+              AND (? IS NULL OR route.firma_id = ?)
             ORDER BY route.firma_id, route.guzergah_kodu
             LIMIT ?
             """,
-            [durak_id, durak_id, bounded_limit],
+            [kalkis_durak_id, varis_durak_id, firma_id, firma_id, bounded_limit],
         ).fetchall()
     columns = (
         "firma_id",
         "firma_unvan",
         "guzergah_kodu",
         "canonical_guzergah_id",
+        "kalkis_durak_id",
+        "kalkis_durak_adi",
+        "varis_durak_id",
+        "varis_durak_adi",
+        "route_stop_count",
+    )
+    return [dict(zip(columns, row, strict=True)) for row in rows]
+
+
+@mcp.tool
+def find_routes_between_stops(
+    first_stop_id: int,
+    second_stop_id: int,
+    firma_id: int | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    """Find routes that visit two stops in the requested travel order.
+
+    Unlike endpoint search, either stop may be intermediate. Results include
+    each stop's order in the route. Reverse-direction routes do not match.
+    Resolve stop names with ``search_stops`` before using this tool.
+    """
+    bounded_limit = max(1, min(limit, 200))
+    with _tool_db() as db:
+        rows = db.execute(
+            """
+            SELECT
+                route.firma_id::INTEGER,
+                company.unvan,
+                route.guzergah_kodu::INTEGER,
+                route.canonical_guzergah_id,
+                first_place.uetds_adi AS first_stop_name,
+                list_position(route.duraklar, ?)::INTEGER AS first_stop_order,
+                second_place.uetds_adi AS second_stop_name,
+                list_position(route.duraklar, ?)::INTEGER AS second_stop_order,
+                departure.uetds_adi AS route_origin_name,
+                arrival.uetds_adi AS route_destination_name,
+                len(route.duraklar)::INTEGER AS route_stop_count
+            FROM guzergah_canonical AS route
+            LEFT JOIN ats_firma AS company ON company.firma_id = route.firma_id
+            LEFT JOIN ats_yer AS first_place ON first_place.id = ?
+            LEFT JOIN ats_yer AS second_place ON second_place.id = ?
+            LEFT JOIN ats_yer AS departure ON departure.id = route.duraklar[1]
+            LEFT JOIN ats_yer AS arrival
+              ON arrival.id = route.duraklar[len(route.duraklar)]
+            WHERE list_position(route.duraklar, ?) IS NOT NULL
+              AND list_position(route.duraklar, ?) IS NOT NULL
+              AND list_position(route.duraklar, ?)
+                  < list_position(route.duraklar, ?)
+              AND (? IS NULL OR route.firma_id = ?)
+            ORDER BY route.firma_id, route.guzergah_kodu
+            LIMIT ?
+            """,
+            [
+                first_stop_id,
+                second_stop_id,
+                first_stop_id,
+                second_stop_id,
+                first_stop_id,
+                second_stop_id,
+                first_stop_id,
+                second_stop_id,
+                firma_id,
+                firma_id,
+                bounded_limit,
+            ],
+        ).fetchall()
+    columns = (
+        "firma_id",
+        "firma_unvan",
+        "guzergah_kodu",
+        "canonical_guzergah_id",
+        "first_stop_name",
+        "first_stop_order",
+        "second_stop_name",
+        "second_stop_order",
+        "route_origin_name",
+        "route_destination_name",
+        "route_stop_count",
+    )
+    return [dict(zip(columns, row, strict=True)) for row in rows]
+
+
+@mcp.tool
+def list_routes_serving_stop(durak_id: int, limit: int = 50) -> list[dict]:
+    """List company routes whose ordered canonical stop list includes a stop.
+
+    Use this when the user asks which routes or companies serve one stop.
+    """
+    bounded_limit = max(1, min(limit, 200))
+    with _tool_db() as db:
+        rows = db.execute(
+            """
+            SELECT
+                route.firma_id::INTEGER,
+                company.unvan,
+                route.guzergah_kodu::INTEGER,
+                route.canonical_guzergah_id,
+                requested_stop.uetds_adi AS durak_adi,
+                list_position(route.duraklar, ?)::INTEGER AS stop_order,
+                len(route.duraklar)::INTEGER AS route_stop_count,
+                departure.uetds_adi AS route_origin_name,
+                arrival.uetds_adi AS route_destination_name
+            FROM guzergah_canonical AS route
+            LEFT JOIN ats_firma AS company ON company.firma_id = route.firma_id
+            LEFT JOIN ats_yer AS requested_stop ON requested_stop.id = ?
+            LEFT JOIN ats_yer AS departure ON departure.id = route.duraklar[1]
+            LEFT JOIN ats_yer AS arrival
+              ON arrival.id = route.duraklar[len(route.duraklar)]
+            WHERE list_contains(route.duraklar, ?)
+            ORDER BY route.firma_id, route.guzergah_kodu
+            LIMIT ?
+            """,
+            [durak_id, durak_id, durak_id, bounded_limit],
+        ).fetchall()
+    columns = (
+        "firma_id",
+        "firma_unvan",
+        "guzergah_kodu",
+        "canonical_guzergah_id",
+        "durak_adi",
         "stop_order",
         "route_stop_count",
+        "route_origin_name",
+        "route_destination_name",
     )
     return [dict(zip(columns, row, strict=True)) for row in rows]
 
@@ -572,6 +783,9 @@ def predict_stop_addition_demand(
     )
     with _tool_db() as db:
         result = predict_stop_addition(request, _loaded_artifacts(), db)
+        result["proposed_route_stops"] = _ordered_route_stops(
+            db, _stop_ids(result.get("proposed_stop_list"))
+        )
     return result
 
 
@@ -593,6 +807,9 @@ def predict_general_stop_addition_demand(
     )
     with _tool_db() as db:
         result = predict_general_stop_addition(request, db)
+        result["proposed_route_stops"] = _ordered_route_stops(
+            db, _stop_ids(result.get("proposed_stop_list"))
+        )
     return result
 
 

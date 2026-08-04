@@ -3,6 +3,7 @@ import { lazy, Suspense } from 'preact/compat';
 import { LoaderCircle } from 'lucide-preact';
 
 import { Header } from './components/Header';
+import { FloatingAssistant } from './components/FloatingAssistant';
 import { Home } from './pages/Home/index';
 import { ProposedRoutes } from './pages/ProposedRoutes/index';
 import './style.css';
@@ -38,6 +39,7 @@ export function App() {
 			<main id="main-content">
 				{page}
 			</main>
+			<FloatingAssistant />
 		</>
 	);
 }

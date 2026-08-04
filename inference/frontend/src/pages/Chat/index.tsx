@@ -34,14 +34,24 @@ const SUGGESTIONS: string[] = [
 	'Eşik olasılıkları ile beklenen talep arasındaki farkı açıkla.',
 ];
 
+const COMPACT_SUGGESTIONS: string[] = [
+	'Talep etiketleri ne anlama geliyor?',
+	'Bir seferin talebini değerlendirelim',
+	'Durak eklemenin etkisini analiz et',
+];
+
+// The compact assistant and /chat are two views of the same conversation.
+// sessionStorage keeps that handoff within the current browser tab only.
+const CHAT_HISTORY_STORAGE_KEY = 'yolcu-talep-chat-history';
+
 let idCounter = 0;
 function messageId(): string {
 	idCounter += 1;
 	return `msg-${Date.now()}-${idCounter}`;
 }
 
-export function Chat() {
-	const [messages, setMessages] = useState<ChatMessage[]>([]);
+export function Chat({ compact = false }: { compact?: boolean }) {
+	const [messages, setMessages] = useState<ChatMessage[]>(readStoredMessages);
 	const [input, setInput] = useState('');
 	const [streaming, setStreaming] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -73,6 +83,18 @@ export function Chat() {
 	}, [messages, responseStartId]);
 
 	useEffect(() => () => abortRef.current?.abort(), []);
+
+	useEffect(() => {
+		try {
+			window.sessionStorage.setItem(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(messages));
+		} catch {
+			// Storage can be unavailable in private or heavily restricted contexts.
+		}
+	}, [messages]);
+
+	useEffect(() => {
+		if (compact) textareaRef.current?.focus();
+	}, [compact]);
 
 	function handleScroll() {
 		const el = scrollRef.current;
@@ -187,8 +209,8 @@ export function Chat() {
 	}
 
 	return (
-		<div class="flex min-h-0 flex-1 flex-col">
-			<div class="border-b border-border bg-white">
+		<div class={`flex min-h-0 flex-1 flex-col ${compact ? 'chat-compact' : ''}`}>
+			{!compact && <div class="border-b border-border bg-white">
 				<div class="mx-auto flex w-full max-w-3xl items-center gap-3 px-4 py-3 sm:px-6">
 					<span class="grid size-8 shrink-0 place-items-center rounded-md bg-primary text-white">
 						<Sparkles class="size-4" aria-hidden="true" />
@@ -207,11 +229,11 @@ export function Chat() {
 						</button>
 					)}
 				</div>
-			</div>
+			</div>}
 
 			<div ref={scrollRef} onScroll={handleScroll} class="min-h-0 flex-1 overflow-y-auto">
 				{messages.length === 0 ? (
-					<EmptyState onSuggestion={(text) => void send(text)} />
+					<EmptyState compact={compact} onSuggestion={(text) => void send(text)} />
 				) : (
 					<div class="mx-auto w-full max-w-3xl space-y-6 px-4 py-6 sm:px-6">
 						{messages.map((message, index) => (
@@ -226,7 +248,7 @@ export function Chat() {
 			</div>
 
 			<div class="shrink-0">
-				<div class="mx-auto w-full max-w-3xl px-4 pb-4 sm:px-6 sm:pb-5">
+				<div class={`mx-auto w-full max-w-3xl ${compact ? 'px-3 pb-3' : 'px-4 pb-4 sm:px-6 sm:pb-5'}`}>
 					{error && <ErrorBanner message={error} onRetry={retry} />}
 					<form
 						onSubmit={(event) => {
@@ -270,16 +292,63 @@ export function Chat() {
 							</button>
 						)}
 					</form>
-					<p class="mt-2 text-center text-xs text-muted-foreground">
+					{!compact && <p class="mt-2 text-center text-xs text-muted-foreground">
 						Enter gönderir, Shift+Enter yeni satır ekler.
-					</p>
+					</p>}
 				</div>
 			</div>
 		</div>
 	);
 }
 
-function EmptyState({ onSuggestion }: { onSuggestion: (text: string) => void }) {
+function readStoredMessages(): ChatMessage[] {
+	try {
+		const stored = window.sessionStorage.getItem(CHAT_HISTORY_STORAGE_KEY);
+		if (!stored) return [];
+		const parsed: unknown = JSON.parse(stored);
+		if (!Array.isArray(parsed)) return [];
+		return parsed.filter((message): message is ChatMessage => (
+			isRecord(message)
+			&& typeof message.id === 'string'
+			&& (message.role === 'user' || message.role === 'assistant')
+			&& typeof message.content === 'string'
+		));
+	} catch {
+		return [];
+	}
+}
+
+function EmptyState({ compact, onSuggestion }: { compact: boolean; onSuggestion: (text: string) => void }) {
+	if (compact) {
+		return (
+			<div class="flex min-h-full flex-col px-5 py-6">
+				<div class="grid size-10 place-items-center rounded-lg bg-primary text-white shadow-sm">
+					<Sparkles class="size-4.5" aria-hidden="true" />
+				</div>
+				<h2 class="mt-4 text-base font-semibold tracking-tight">Nasıl yardımcı olabilirim?</h2>
+				<p class="mt-1 max-w-sm text-sm leading-6 text-muted-foreground">
+					Sefer talebi ve güzergâh kararları için verilerinizi birlikte inceleyelim.
+				</p>
+				<div class="mt-6">
+					<p class="mb-2 text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Hızlı başlangıç</p>
+					<div class="grid gap-2">
+						{COMPACT_SUGGESTIONS.map((suggestion) => (
+							<button
+								key={suggestion}
+								type="button"
+								onClick={() => onSuggestion(suggestion)}
+								class="group flex items-center gap-3 rounded-lg border border-border bg-white px-3.5 py-3 text-left text-sm font-medium text-foreground shadow-sm transition-all hover:-translate-y-px hover:border-slate-300 hover:shadow-md"
+							>
+								<span class="size-1.5 shrink-0 rounded-full bg-slate-300 transition-colors group-hover:bg-primary" />
+								<span>{suggestion}</span>
+							</button>
+						))}
+					</div>
+				</div>
+			</div>
+		);
+	}
+
 	return (
 		<div class="mx-auto flex h-full w-full max-w-3xl flex-col items-center justify-center px-4 py-10 text-center sm:px-6">
 			<div class="grid size-12 place-items-center rounded-full bg-muted text-muted-foreground">
@@ -356,8 +425,24 @@ function MessageBubble({ message, active }: { message: ChatMessage; active: bool
 
 function mapsFromToolResults(toolResults: Awaited<ReturnType<typeof streamText>>['toolResults'] extends PromiseLike<infer T> ? T : never): ChatMap[] {
 	const maps: ChatMap[] = [];
+	const proposedMaps: ChatMap[] = [];
 	for (const result of toolResults) {
 		if (result.type !== 'tool-result') continue;
+		if (
+			result.toolName === 'predict_stop_addition_demand'
+			|| result.toolName === 'predict_general_stop_addition_demand'
+		) {
+			const proposal = stopAdditionRoute(result.output);
+			if (proposal && proposal.duraklar.length > 0) {
+				proposedMaps.push({
+					id: result.toolCallId,
+					title: 'Önerilen güzergâh haritası',
+					description: 'Yeni durak yeşil renkle vurgulanır',
+					duraklar: proposal.duraklar,
+					highlightedStopId: proposal.addedStopId,
+				});
+			}
+		}
 		if (
 			result.toolName === 'get_company_route_details'
 			|| result.toolName === 'get_canonical_route_details'
@@ -386,7 +471,24 @@ function mapsFromToolResults(toolResults: Awaited<ReturnType<typeof streamText>>
 			}
 		}
 	}
-	return maps;
+	// A stop-addition answer may also call route details for context. In that
+	// case the proposed route is the useful map and must replace the old route.
+	return proposedMaps.length > 0 ? proposedMaps : maps;
+}
+
+function stopAdditionRoute(value: unknown): { duraklar: RouteDurak[]; addedStopId?: number } | null {
+	value = unwrapMcpToolOutput(value);
+	if (!isRecord(value) || !Array.isArray(value.proposed_route_stops)) return null;
+	const duraklar = value.proposed_route_stops.flatMap((stop) => {
+		const parsed = routeStopFromResult(stop);
+		return parsed ? [parsed] : [];
+	});
+	return {
+		duraklar,
+		addedStopId: isFiniteNumber(value.added_stop_uetds_yer_id)
+			? value.added_stop_uetds_yer_id
+			: undefined,
+	};
 }
 
 function routeStops(value: unknown): RouteDurak[] {

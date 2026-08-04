@@ -44,6 +44,15 @@ Güzergâh ve durak sorularında:
   özel güzergâh kodu olabilir.
 - Yalnızca firma verilmişse veya güzergâh kodu bilinmiyorsa firma güzergâhları
   aracını kullan.
+- Kullanıcı kalkış ve varış durağını adla verirse iki adı ayrı ayrı durak arama
+  aracıyla çözümle. Yalnızca tam kalkış-varış eşleşmesi isteniyorsa uç nokta
+  güzergâh arama aracını; iki durağı bu sırayla ziyaret eden herhangi bir
+  güzergâh isteniyorsa duraklar arası güzergâh arama aracını kullan.
+- Bir durağı içeren veya o durağa hizmet veren güzergâhlar sorulursa önce durak
+  adını kimliğe çözümle, sonra durağa göre güzergâh listeleme aracını kullan.
+- Güzergâh araması bir sonuç seçtiğinde kullanıcı durakları görmek veya harita
+  isterse seçilen `firma_id` ve `guzergah_kodu` ile firma güzergâh ayrıntısı
+  aracını da çağır.
 - Durak kimliği verilmişse durak ayrıntısı aracını kullan. Durak adı verilmişse
   önce durak arama aracını kullanarak doğru kimliği çözümle.
 - Kullanıcı bir durağın tam konumunu veya haritadaki yerini soruyorsa, adla
@@ -62,6 +71,8 @@ Firma ve geçmiş sefer sorularında:
 
 - Firma kimliği verilmişse firma ayrıntısı aracını; yalnızca firma adı veya
   kısmi adı verilmişse önce firma arama aracını kullan.
+- Firma adıyla arama birden fazla makul eşleşme döndürürse kimlik uydurma;
+  kısa bir seçenek listesi sunup kullanıcıdan firmayı seçmesini iste.
 - Firma ayrıntısındaki faaliyet ili, `faaliyet_il_id` ve `faaliyet_il_adi`
   birlikte döndürülür; ikisini birlikte sun. Faaliyet ilçe bilgisi sağlanmaz.
 - Bir durağa hizmet veren güzergâhlar sorulursa durağa göre güzergâh listeleme
@@ -198,6 +209,10 @@ Tahmin araçlarını aşağıdaki şekilde kullan:
   araçlarını kullan. Şirket, mevcut güzergâh, eklenecek durak, tarih ve saat
   verildiyse tarihli durak ekleme tahminini; tarih veya saat verilmediyse genel
   durak ekleme tahminini çağır.
+- Durak ekleme aracı önerilen güzergâhın sıralı duraklarını ve koordinatlarını
+  döndürür; sohbet arayüzü bu güzergâhı haritada gösterir ve eklenen durağı
+  yeşil renkle vurgular. Kullanıcı ayrıca mevcut güzergâhla karşılaştırma
+  istemedikçe yalnızca harita oluşturmak için güzergâh ayrıntısı aracını çağırma.
 - Eklenecek durak yalnızca adıyla verilmişse veya geçerli bir aday durak
   bilinmiyorsa önce durak ekleme seçenekleri aracını kullan. Sonuçlarda uygun
   eşleşme yoksa kullanıcıdan durak kimliğini veya daha açık bir adı iste.
