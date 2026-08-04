@@ -187,12 +187,12 @@ export function PredictionAssessment({
 
 	return (
 		<section
-			class={`h-full overflow-hidden rounded-lg border shadow-sm lg:col-span-3 ${demand.shell}`}
+			class="h-full overflow-hidden rounded-lg border border-border bg-background shadow-sm lg:col-span-3"
 			aria-label="Talep ve güvenilirlik değerlendirmesi"
 			role={needsAttention ? 'alert' : undefined}
 		>
 			<div class="grid h-full lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,.9fr)]">
-				<div class="flex items-start gap-4 p-5 sm:p-6">
+				<div class={`flex items-start gap-4 p-5 sm:p-6 ${demand.shell}`}>
 					<span class={`grid size-11 shrink-0 place-items-center rounded-full ${demand.iconClass}`}>
 						<DemandIcon class="size-5" aria-hidden="true" />
 					</span>
@@ -211,7 +211,7 @@ export function PredictionAssessment({
 					</div>
 				</div>
 
-				<div class="border-t border-current/10 bg-white/45 p-5 sm:p-6 lg:border-l lg:border-t-0">
+				<div class={`border-t border-current/10 p-5 text-foreground sm:p-6 lg:border-l lg:border-t-0 ${confidence.card}`}>
 					<p class="text-xs font-semibold uppercase tracking-wider opacity-65">Tahmin güvenilirliği</p>
 					<div class="mt-3 flex items-start gap-3">
 						<span class={`grid size-9 shrink-0 place-items-center rounded-full ${confidence.iconClass}`}>
