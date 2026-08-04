@@ -1,4 +1,5 @@
 import { Building2 } from 'lucide-preact';
+import { titleCase } from '../lib/display';
 
 export function PredictionContext({
 	heading,
@@ -38,14 +39,6 @@ export function PredictionContext({
 			<h2 class="mt-3 text-base font-semibold">{heading}</h2>
 		</header>
 	);
-}
-
-function titleCase(value: string) {
-	return value
-		.toLocaleLowerCase('tr-TR')
-		.split(/\s+/)
-		.map((word) => word.charAt(0).toLocaleUpperCase('tr-TR') + word.slice(1))
-		.join(' ');
 }
 
 function formatDate(value: string) {

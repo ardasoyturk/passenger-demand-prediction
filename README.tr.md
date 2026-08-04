@@ -27,8 +27,6 @@ training/
 │   ├── predict_trips_batch.py   # CSV toplu tahmin aracı
 │   ├── check_trips.py           # İnceleme bayrakları üreten denetim aracı
 │   ├── stop_addition/           # Durak ekleme tahmini, artış ve iş kuralları
-│   ├── artifacts/stop_addition/ # Seçili durak ekleme modeli ve sözleşmesi
-│   ├── tests/stop_addition/     # Dondurulmuş 65 satırlık girdi ve referans
 │   ├── api/                     # İki proje için ortak FastAPI servisi
 │   └── frontend/                # Preact/Vite arayüzü
 ├── scripts/                     # Sürümlenmiş eğitim ve değerlendirme akışları
@@ -38,13 +36,17 @@ training/
 │   │   ├── build_training_data.py
 │   │   ├── build_training_scenarios.py
 │   │   └── train_demand_model.py
-│   └── catboost/v1 … v4_5/      # Ortak modülleri kullanan, yeniden çalıştırılabilir model deneyleri
+│   └── catboost/v1 … v4_5/      # Sürümlenmiş model deneyleri ve değerlendirmeler
+├── archive/                     # Yerel tarihsel notlar ve test dosyaları
 ├── pyproject.toml               # Python bağımlılıkları ve sürüm gereksinimi
 ├── package.json                 # Ön yüz ve arka yüz geliştirme komutları
 └── README.md                    # İngilizce dokümantasyon
 ```
 
-`scripts/` dizini eğitim ve değerlendirme akışlarını içerir. Her sürüm deneyi (`v4_1` ile `v4_5` arasındakiler) ortak kodu yalnızca `scripts/shared/` dizininden alır; başka bir sürümün kodunu içe aktarması gerekmez. Ortak modüller şunlardır:
+`scripts/` dizini eğitim ve değerlendirme akışlarını içerir. Yeni akışlar
+`scripts/shared/` dizinindeki ortak kodu kullanır; eski sürüm deneyleri bağımsız
+tarihsel uygulamalar olarak korunur. `inference/` dizini bilinçli olarak kendi
+başınadır ve `scripts/` altından kod içe aktarmaz. Ortak modüller şunlardır:
 
 | Modül | Görevi |
 |---|---|
@@ -133,12 +135,12 @@ Bu çıktı, tahmine ek olarak yalnızca teklif tarihinden önceki rota, tam saa
 ### Durak ekleme değerlendirmesi
 
 Durak ekleme çalışma zamanı aynı `inference/` arka yüzünün parçasıdır ve
-`scripts/` altından kod içe aktarmaz. Dondurulmuş 65 satırlık regresyon testi
-şöyle çalıştırılır:
+`scripts/` altından kod içe aktarmaz. İsteğe bağlı dondurulmuş 65 satırlık test
+girdisi yerel arşivde tutulur; arşiv mevcutsa şöyle çalıştırılır:
 
 ```powershell
 uv run python -m inference.stop_addition.evaluator `
-  --input inference/tests/stop_addition/fixtures/requests_65.csv `
+  --input archive/stop_addition_tests/fixtures/requests_65.csv `
   --output stop_addition_evaluation.csv
 ```
 

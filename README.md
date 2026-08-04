@@ -27,8 +27,6 @@ training/
 │   ├── predict_trips_batch.py   # Batch CSV CLI
 │   ├── check_trips.py           # Audit CLI with review flags
 │   ├── stop_addition/           # Proposed-stop inference, uplift, and rules
-│   ├── artifacts/stop_addition/ # Selected stop-addition model and contract
-│   ├── tests/stop_addition/     # Frozen 65-row fixture and baseline
 │   ├── api/                     # Shared FastAPI service for both projects
 │   └── frontend/                # Preact/Vite interface
 ├── scripts/                     # Versioned training and evaluation workflows
@@ -38,14 +36,14 @@ training/
 │   │   ├── build_training_data.py
 │   │   ├── build_training_scenarios.py
 │   │   └── train_demand_model.py
-│   └── catboost/v1 … v4_5/      # Reproducible model experiments using shared modules only
-├── archive/stop_addition/       # Preserved stop-addition analyses and frozen staging
+│   └── catboost/v1 … v4_5/      # Versioned model experiments and evaluations
+├── archive/                     # Local historical notes and test artifacts
 ├── pyproject.toml               # Python dependencies and version requirement
 ├── package.json                 # Frontend/backend development commands
 └── README.tr.md                 # Turkish documentation
 ```
 
-`scripts/` contains the training and evaluation workflows. Each versioned experiment (`v4_1` through `v4_5`) uses `scripts/shared/` and does not import code from another version. The shared modules provide:
+`scripts/` contains the training and evaluation workflows. The newer workflows use `scripts/shared/`; older versioned experiments remain as standalone historical implementations. Inference is intentionally self-contained and does not import from `scripts/`. The shared modules provide:
 
 | Module | Purpose |
 |---|---|
@@ -134,11 +132,12 @@ In addition to the prediction, the audit output includes strict-earlier route, e
 ### Stop-addition evaluation
 
 The stop-addition runtime is part of the same `inference/` backend and does not
-import anything from `scripts/`. The frozen 65-row regression can be run with:
+import anything from `scripts/`. The optional frozen 65-row regression fixture
+is kept in the local archive and can be run when that archive is available:
 
 ```powershell
 uv run python -m inference.stop_addition.evaluator `
-  --input inference/tests/stop_addition/fixtures/requests_65.csv `
+  --input archive/stop_addition_tests/fixtures/requests_65.csv `
   --output stop_addition_evaluation.csv
 ```
 

@@ -14,7 +14,7 @@ export const CHAT_CONFIG: {
 	mcpUrl: string;
 } = {
 	provider: 'gateway',
-	model: 'stepfun/step-3.5-flash',
+	model: 'alibaba/qwen3.7-flash',
 	gatewayBaseUrl: '/api/gateway',
 	openAICompatibleBaseUrl: 'http://localhost:1234/v1',
 	mcpUrl: '/api/mcp/',

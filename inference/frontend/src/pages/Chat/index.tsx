@@ -9,6 +9,7 @@ import type { RouteDurak } from '../../api';
 import { chatModel } from './llm';
 import { createPredictionMCPClient } from './mcp';
 import { getSystemPrompt } from './system-prompt';
+import { errorMessage } from '../../lib/errors';
 
 interface ChatMessage {
 	id: string;
@@ -501,9 +502,4 @@ function ErrorBanner({ message, onRetry }: { message: string; onRetry: () => voi
 			</div>
 		</div>
 	);
-}
-
-function errorMessage(error: unknown): string {
-	if (error instanceof Error) return error.message;
-	return 'Bilinmeyen bir hata oluştu.';
 }

@@ -3,17 +3,20 @@ import { useState } from 'preact/hooks';
 import {
 	AlertTriangle, BadgeCheck, Ban, Building2, BusFront, CalendarDays,
 	CircleHelp, Clock3, Database, GitCompareArrows, Info, LoaderCircle,
-	MapPinPlus, Network, Route, SearchCheck, TrendingUp,
+	MapPinPlus, Network, Route, TrendingUp,
 } from 'lucide-preact';
 import {
-	ApiError, getDurak, getRoute, predictGeneralStopAddition, predictStopAddition,
+	getDurak, getRoute, predictGeneralStopAddition, predictStopAddition,
 } from '../../api';
 import type {
 	Durak, GeneralStopAdditionRequest, RouteDetailResponse, RouteDurak,
 	StopAdditionPrediction, StopAdditionRequest,
 } from '../../api';
 import { RouteMap } from '../../components/RouteMap';
+import { Field, inputClass, ModeToggle, STANDARD_MODES } from '../../components/FormControls';
 import { PredictionContext } from '../../components/PredictionContext';
+import { errorMessage, STOP_ADDITION_ERROR_LABELS } from '../../lib/errors';
+import { stopName, titleCase } from '../../lib/display';
 
 type Result =
 	| { status: 'idle' }
@@ -53,7 +56,7 @@ export function ProposedRoutes() {
 				setResult({ ...context, mode: 'trip', request: submission.request });
 			}
 		} catch (error) {
-			setResult({ status: 'error', message: errorMessage(error) });
+			setResult({ status: 'error', message: errorMessage(error, STOP_ADDITION_ERROR_LABELS) });
 		}
 	}
 
@@ -106,11 +109,6 @@ export function ProposedRoutes() {
 	);
 }
 
-const MODES: { value: StopAdditionMode; label: string }[] = [
-	{ value: 'trip', label: 'Sefer bazlı' },
-	{ value: 'general', label: 'Genel rota' },
-];
-
 function ProposalForm({ onSubmit, loading }: { onSubmit: (submission: StopAdditionSubmission) => void; loading: boolean }) {
 	const [mode, setMode] = useState<StopAdditionMode>('trip');
 	const [firma, setFirma] = useState('49');
@@ -150,36 +148,29 @@ function ProposalForm({ onSubmit, loading }: { onSubmit: (submission: StopAdditi
 							: 'Mevcut güzergâhı, eklenecek durağı ve planlanan sefer zamanını girin.'}
 					</p>
 				</div>
-				<div class="inline-flex shrink-0 rounded-md border border-border bg-muted p-0.5" role="group" aria-label="Değerlendirme türü">
-					{MODES.map((item) => (
-						<button
-							key={item.value}
-							type="button"
-							aria-pressed={mode === item.value}
-							onClick={() => setMode(item.value)}
-							class={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${mode === item.value ? 'bg-white text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-						>
-							{item.label}
-						</button>
-					))}
-				</div>
+				<ModeToggle
+					options={STANDARD_MODES}
+					value={mode}
+					onChange={setMode}
+					ariaLabel="Değerlendirme türü"
+				/>
 			</div>
 			<div class={`grid gap-4 p-5 md:grid-cols-2 lg:items-end ${general ? 'lg:grid-cols-[.85fr_1fr_1fr_auto]' : 'lg:grid-cols-[.85fr_1fr_1fr_1.1fr_.85fr_auto]'}`}>
-				<Field label="Firma ID" invalid={touched && !validId(firma)}>
+				<Field label="Firma ID" error={touched && !validId(firma)}>
 					<input aria-label="Firma" type="number" min={0} class={inputClass(touched && !validId(firma))} value={firma} onInput={(e) => setFirma(e.currentTarget.value)} />
 				</Field>
-				<Field label="Mevcut Güzergâh Kodu" invalid={touched && !validId(route)}>
+				<Field label="Mevcut Güzergâh Kodu" error={touched && !validId(route)}>
 					<input aria-label="Mevcut Güzergâh Kodu" type="number" min={0} class={inputClass(touched && !validId(route))} value={route} onInput={(e) => setRoute(e.currentTarget.value)} />
 				</Field>
-				<Field label="Eklenecek Durak" invalid={touched && !validId(stop)}>
+				<Field label="Eklenecek Durak" error={touched && !validId(stop)}>
 					<input aria-label="Eklenecek Durak" type="number" min={0} class={inputClass(touched && !validId(stop))} value={stop} onInput={(e) => setStop(e.currentTarget.value)} />
 				</Field>
 				{!general && (
 					<>
-						<Field label="Planlanan Sefer Tarihi" invalid={touched && !date}>
+						<Field label="Planlanan Sefer Tarihi" error={touched && !date}>
 							<input aria-label="Planlanan Sefer Tarihi" type="date" min="2023-01-01" class={`${inputClass(touched && !date)} [color-scheme:light]`} value={date} onInput={(e) => setDate(e.currentTarget.value)} />
 						</Field>
-						<Field label="Planlanan Kalkış Saati" invalid={touched && !time}>
+						<Field label="Planlanan Kalkış Saati" error={touched && !time}>
 							<input aria-label="Planlanan Kalkış Saati" type="time" class={`${inputClass(touched && !time)} [color-scheme:light]`} value={time} onInput={(e) => setTime(e.currentTarget.value)} />
 						</Field>
 					</>
@@ -358,7 +349,7 @@ function ProposedTimeline({ stops, insertedStopId }: { stops: RouteDurak[]; inse
 						return <li key={`${stop.durak_id}-${index}`} class="relative w-44 shrink-0 pr-5 last:pr-0">
 							{index < stops.length - 1 && <span class="absolute left-3 right-0 top-2.5 h-px bg-border" />}
 							<span class={`relative z-10 block size-5 rounded-full border-4 border-white ${inserted ? 'bg-emerald-500 ring-2 ring-emerald-200' : edge ? 'bg-slate-900 ring-1 ring-slate-900' : 'bg-slate-300 ring-1 ring-slate-300'}`} />
-							<p class="mt-3 max-w-36 text-sm font-medium leading-snug">{stop.durak_adi ?? stop.kisa_adi ?? `Durak ${stop.durak_id}`}</p>
+							<p class="mt-3 max-w-36 text-sm font-medium leading-snug">{stopName(stop)}</p>
 							<p class={`mt-1 text-xs ${inserted ? 'font-semibold text-emerald-600' : 'text-muted-foreground'}`}>{inserted ? 'Yeni durak' : index === 0 ? 'Kalkış' : index === stops.length - 1 ? 'Varış' : `${index + 1}. durak`}</p>
 						</li>;
 					})}
@@ -403,25 +394,7 @@ function LoadingState() {
 function ErrorBanner({ message }: { message: string }) {
 	return <div class="animate-enter mt-6 flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700" role="alert"><AlertTriangle class="mt-0.5 size-4 shrink-0" /><div><strong class="font-medium">Durak ekleme önerisi değerlendirilemedi.</strong> <span>{message}</span></div></div>;
 }
-
-function Field({ label, invalid, children }: { label: string; invalid: boolean; children: preact.ComponentChildren }) {
-	return <label class="grid gap-2 text-sm font-medium"><span class={invalid ? 'text-red-600' : ''}>{label}</span>{children}</label>;
-}
-function inputClass(error: boolean) { return `h-10 min-w-0 w-full rounded-md border bg-white px-3 text-sm shadow-sm outline-none transition-colors focus:ring-2 focus:ring-slate-400/25 ${error ? 'border-red-500' : 'border-border focus:border-slate-400'}`; }
 function validId(value: string) { return value !== '' && Number.isInteger(Number(value)) && Number(value) >= 0; }
-function errorMessage(error: unknown) { return error instanceof Error ? (error instanceof ApiError ? apiErrorLabel(error.message) : error.message) : 'Bilinmeyen bir hata oluştu.'; }
-function apiErrorLabel(value: string) {
-	const labels: Record<string, string> = {
-		COMPANY_NOT_FOUND: 'Firma bulunamadı.',
-		CURRENT_ROUTE_NOT_FOUND_FOR_COMPANY: 'Bu firmaya ait mevcut güzergâh bulunamadı.',
-		CANDIDATE_STOP_NOT_FOUND: 'Eklenecek durak bulunamadı.',
-		CURRENT_ROUTE_TOO_SHORT: 'Mevcut rota durak eklemek için çok kısa.',
-		CANDIDATE_STOP_ALREADY_IN_ROUTE: 'Seçilen durak bu rotada zaten bulunuyor.',
-		ROUTE_OR_CANDIDATE_COORDINATES_UNUSABLE: 'Rota veya durak koordinatları kullanılamıyor.',
-		NO_USABLE_INTERMEDIATE_INSERTION: 'Durak için kullanılabilir bir ara ekleme konumu bulunamadı.',
-	};
-	return labels[value] ?? `Sunucu yanıtı: ${value}`;
-}
 function decisionConfig(decision: StopAdditionPrediction['business_decision']) {
 	if (decision === 'APPROVE') return { label: 'Önerilir', shell: 'border-emerald-300 bg-emerald-100/70 text-emerald-950', badge: 'bg-emerald-700 text-white', icon: 'bg-emerald-700 text-white', Icon: BadgeCheck };
 	if (decision === 'REJECT') return { label: 'Önerilmez', shell: 'border-red-300 bg-red-100/70 text-red-950', badge: 'bg-red-700 text-white', icon: 'bg-red-700 text-white', Icon: Ban };
@@ -499,10 +472,6 @@ function decisionFactors(prediction: StopAdditionPrediction) {
 	return factors;
 }
 function signed(value: number, digits: number) { return `${value >= 0 ? '+' : ''}${value.toFixed(digits)}`; }
-function titleCase(title: string) {
-	return title.toLocaleLowerCase('tr').split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-}
-function stopName(stop: Durak | null, id: number) { return stop?.uetds_adi ?? stop?.kisa_adi ?? `Durak ${id}`; }
 function count(value: number | null | undefined) { return typeof value === 'number' && Number.isFinite(value) ? value : 0; }
 function hasLimitedComparison(prediction: StopAdditionPrediction) {
 	return count(prediction.current_route_history_exact_time_count) === 0

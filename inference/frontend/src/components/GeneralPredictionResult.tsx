@@ -1,6 +1,7 @@
 import { Building2, Database, Route } from 'lucide-preact';
 import type { GeneralPrediction } from '../api';
 import { PredictionAssessment } from './DemandLabel';
+import { baselineExplanation } from '../lib/baseline';
 
 export function GeneralPredictionResult({ prediction }: { prediction: GeneralPrediction }) {
 	return (
@@ -65,18 +66,4 @@ function GeneralEvidenceCard({ prediction }: { prediction: GeneralPrediction }) 
 			</div>
 		</div>
 	);
-}
-
-function baselineExplanation(prediction: GeneralPrediction) {
-	const count = prediction.baseline_trip_count.toLocaleString('tr-TR');
-	switch (prediction.baseline_source) {
-		case 'company_route':
-			return `Aynı firma ve güzergâhtaki ${count} geçmiş seferin ortalaması kullanıldı.`;
-		case 'canonical_route':
-			return `Aynı fiziksel rotadaki ${count} geçmiş seferin ortalaması kullanıldı.`;
-		case 'global':
-			return 'Daha özel bir geçmiş eşleşmesi bulunamadığı için genel tarihsel ortalama kullanıldı.';
-		default:
-			return 'Kullanılan tarihsel referans kaynağı belirlenemedi.';
-	}
 }

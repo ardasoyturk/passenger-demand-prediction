@@ -1,6 +1,7 @@
 import { Building2, CalendarDays, Clock3, Database, Network, Route } from 'lucide-preact';
 import type { ReliabilityEvidence, SimplifiedPrediction } from '../api';
 import { DemandStatus, ReliabilityStatus } from './DemandLabel';
+import { baselineExplanation } from '../lib/baseline';
 
 export function PredictionResult({ prediction }: { prediction: SimplifiedPrediction }) {
 	const { expected_demand, baseline_demand, demand_label, reliability, reliability_reason, probabilities, reliability_evidence } = prediction;
@@ -108,26 +109,6 @@ function ReliabilityEvidenceCard({ evidence }: { evidence: ReliabilityEvidence }
 			)}
 		</div>
 	);
-}
-
-function baselineExplanation(evidence: ReliabilityEvidence) {
-	const format = (count: number) => count.toLocaleString('tr-TR');
-	switch (evidence.baseline_source) {
-		case 'company_route_time_weekday':
-			return `Aynı firma, güzergâh, saat ve hafta günündeki ${format(evidence.exact_time_weekday_count)} geçmiş seferin ortalaması kullanıldı.`;
-		case 'company_route_time':
-			return `Aynı firma, güzergâh ve saatteki ${format(evidence.exact_time_count)} geçmiş seferin ortalaması kullanıldı.`;
-		case 'company_route':
-			return `Aynı firma ve güzergâhtaki ${format(evidence.company_route_count)} geçmiş seferin ortalaması kullanıldı.`;
-		case 'canonical_route_time_weekday':
-			return `Aynı fiziksel rota, zaman dilimi ve hafta günündeki ${format(evidence.canonical_time_weekday_count)} geçmiş seferin ortalaması kullanıldı.`;
-		case 'canonical_route':
-			return `Aynı fiziksel rotadaki ${format(evidence.canonical_route_count)} geçmiş seferin ortalaması kullanıldı.`;
-		case 'global':
-			return 'Daha özel bir geçmiş eşleşmesi bulunamadığı için genel tarihsel ortalama kullanıldı.';
-		default:
-			return 'Kullanılan tarihsel referans kaynağı belirlenemedi.';
-	}
 }
 
 function Probability({ label, value }: { label: string; value: number }) {

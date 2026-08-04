@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date, time
 from pathlib import Path
 
@@ -10,7 +12,7 @@ import duckdb
 from fastapi import HTTPException
 from fastmcp import FastMCP
 
-from inference.api.routes.durak import get_durak
+from inference.api.routes.durak import DURAK_COLUMNS, DURAK_SELECT, get_durak
 from inference.api.routes.predict import predict
 from inference.api.routes.predict_general import predict_general_route
 from inference.api.routes.route import get_route, list_company_routes
@@ -62,6 +64,15 @@ def _tool_error(exc: HTTPException) -> ValueError:
     return ValueError(str(exc.detail))
 
 
+@contextmanager
+def _tool_db() -> Iterator[duckdb.DuckDBPyConnection]:
+    try:
+        with duckdb.connect(str(DB_PATH), read_only=True) as db:
+            yield db
+    except HTTPException as exc:
+        raise _tool_error(exc) from exc
+
+
 def _city_name(il_id: int | None) -> str | None:
     return CITY_NAMES_BY_ID.get(il_id) if il_id is not None else None
 
@@ -73,7 +84,7 @@ def list_routes_for_company(firma_id: int) -> dict:
     Use this when a user knows the company but not the route code, or asks what
     routes a company operates.
     """
-    with duckdb.connect(str(DB_PATH), read_only=True) as db:
+    with _tool_db() as db:
         result = list_company_routes(firma_id, db)
     return result.model_dump(mode="json")
 
@@ -86,11 +97,8 @@ def get_company_route_details(firma_id: int, guzergah_kodu: int) -> dict:
     name, administrative IDs, latitude, and longitude. Use these coordinates
     when the user asks to visualize, map, or explain a company route.
     """
-    with duckdb.connect(str(DB_PATH), read_only=True) as db:
-        try:
-            result = get_route(firma_id, guzergah_kodu, db)
-        except HTTPException as exc:
-            raise _tool_error(exc) from exc
+    with _tool_db() as db:
+        result = get_route(firma_id, guzergah_kodu, db)
     return result.model_dump(mode="json")
 
 
@@ -101,7 +109,7 @@ def get_canonical_route_details(canonical_guzergah_id: int) -> dict:
     Use this when the user supplies a canonical physical-route ID instead of a
     company and route code. The ordered stops include map coordinates.
     """
-    with duckdb.connect(str(DB_PATH), read_only=True) as db:
+    with _tool_db() as db:
         aliases = db.execute(
             """
             SELECT
@@ -117,10 +125,7 @@ def get_canonical_route_details(canonical_guzergah_id: int) -> dict:
         ).fetchall()
         if not aliases:
             raise ValueError("Canonical route not found")
-        try:
-            detail = get_route(int(aliases[0][0]), int(aliases[0][1]), db)
-        except HTTPException as exc:
-            raise _tool_error(exc) from exc
+        detail = get_route(int(aliases[0][0]), int(aliases[0][1]), db)
     return {
         "canonical_guzergah_id": canonical_guzergah_id,
         "company_routes": [
@@ -142,11 +147,8 @@ def get_stop_details(durak_id: int) -> dict:
     Returns UETDS code/name, type, province/district IDs, country, and map
     coordinates. Use this for questions about one specific stop.
     """
-    with duckdb.connect(str(DB_PATH), read_only=True) as db:
-        try:
-            result = get_durak(durak_id, db)
-        except HTTPException as exc:
-            raise _tool_error(exc) from exc
+    with _tool_db() as db:
+        result = get_durak(durak_id, db)
     return result.model_dump(mode="json")
 
 
@@ -162,12 +164,11 @@ def search_stops(query: str, limit: int = 20) -> list[dict]:
         raise ValueError("Stop search query cannot be empty")
     bounded_limit = max(1, min(limit, 50))
     pattern = f"%{normalized.casefold()}%"
-    with duckdb.connect(str(DB_PATH), read_only=True) as db:
+    with _tool_db() as db:
         rows = db.execute(
-            """
+            f"""
             SELECT
-                id, uetds_kodu, turu, uetds_adi, il_id, ilce_id, kisa_adi,
-                ulke_id, ulke_adi, enlem, boylam
+                {DURAK_SELECT}
             FROM ats_yer
             WHERE CAST(id AS VARCHAR) = ?
                OR contains(lower(coalesce(uetds_kodu, '')), ?)
@@ -181,20 +182,7 @@ def search_stops(query: str, limit: int = 20) -> list[dict]:
             """,
             [normalized, pattern[1:-1], pattern[1:-1], pattern[1:-1], normalized, bounded_limit],
         ).fetchall()
-    columns = (
-        "id",
-        "uetds_kodu",
-        "turu",
-        "uetds_adi",
-        "il_id",
-        "ilce_id",
-        "kisa_adi",
-        "ulke_id",
-        "ulke_adi",
-        "enlem",
-        "boylam",
-    )
-    return [dict(zip(columns, row, strict=True)) for row in rows]
+    return [dict(zip(DURAK_COLUMNS, row, strict=True)) for row in rows]
 
 
 @mcp.tool
@@ -204,7 +192,7 @@ def get_company_details(firma_id: int) -> dict:
     Use this for factual questions about a company ID. Demand statistics are
     descriptive historical values, not future predictions.
     """
-    with duckdb.connect(str(DB_PATH), read_only=True) as db:
+    with _tool_db() as db:
         row = db.execute(
             """
             SELECT
@@ -255,7 +243,7 @@ def search_companies(query: str, limit: int = 20) -> list[dict]:
     if not normalized:
         raise ValueError("Company search query cannot be empty")
     bounded_limit = max(1, min(limit, 50))
-    with duckdb.connect(str(DB_PATH), read_only=True) as db:
+    with _tool_db() as db:
         rows = db.execute(
             """
             SELECT firma_id::INTEGER, unvan, faaliyet_il_id
@@ -284,7 +272,7 @@ def get_trip_details(sefer_id: int) -> dict:
     This returns a past observation, not a prediction. The company-specific and
     canonical route identifiers can be used with the route tools.
     """
-    with duckdb.connect(str(DB_PATH), read_only=True) as db:
+    with _tool_db() as db:
         row = db.execute(
             """
             SELECT
@@ -324,7 +312,7 @@ def get_company_route_history_summary(firma_id: int, guzergah_kodu: int) -> dict
     Returns trip count, coverage dates, mean/median/min/max observed demand, and
     the number of distinct departure times. This is descriptive, not a forecast.
     """
-    with duckdb.connect(str(DB_PATH), read_only=True) as db:
+    with _tool_db() as db:
         row = db.execute(
             """
             SELECT
@@ -367,7 +355,7 @@ def get_company_route_history_summary(firma_id: int, guzergah_kodu: int) -> dict
 def list_routes_serving_stop(durak_id: int, limit: int = 50) -> list[dict]:
     """List company routes whose ordered canonical stop list includes a stop."""
     bounded_limit = max(1, min(limit, 200))
-    with duckdb.connect(str(DB_PATH), read_only=True) as db:
+    with _tool_db() as db:
         rows = db.execute(
             """
             SELECT
@@ -415,11 +403,8 @@ def predict_trip_demand(
         sefer_tarihi=sefer_tarihi,
         sefer_saati=sefer_saati,
     )
-    with duckdb.connect(str(DB_PATH), read_only=True) as db:
-        try:
-            result = predict(request, _loaded_artifacts(), db, detail=False)
-        except HTTPException as exc:
-            raise _tool_error(exc) from exc
+    with _tool_db() as db:
+        result = predict(request, _loaded_artifacts(), db, detail=False)
     return result.model_dump(mode="json")
 
 
@@ -432,11 +417,8 @@ def predict_general_route_demand(firma_id: int, guzergah_kodu: int) -> dict:
     live date-specific model prediction.
     """
     request = GeneralPredictionRequest(firma_id=firma_id, guzergah_kodu=guzergah_kodu)
-    with duckdb.connect(str(DB_PATH), read_only=True) as db:
-        try:
-            result = predict_general_route(request, db)
-        except HTTPException as exc:
-            raise _tool_error(exc) from exc
+    with _tool_db() as db:
+        result = predict_general_route(request, db)
     return result.model_dump(mode="json")
 
 
@@ -451,18 +433,15 @@ def find_stop_addition_options(
     instead of its ID, or has not provided a candidate stop. Returns company,
     current route, and candidate stop identifiers and names.
     """
-    with duckdb.connect(str(DB_PATH), read_only=True) as db:
-        try:
-            options = available_routes(
-                db,
-                firma_id=firma_id,
-                search=search,
-                has_trip_history_both=False,
-                limit=50,
-                offset=0,
-            )
-        except HTTPException as exc:
-            raise _tool_error(exc) from exc
+    with _tool_db() as db:
+        options = available_routes(
+            db,
+            firma_id=firma_id,
+            search=search,
+            has_trip_history_both=False,
+            limit=50,
+            offset=0,
+        )
     return [option.model_dump(mode="json") for option in options]
 
 
@@ -487,11 +466,8 @@ def predict_stop_addition_demand(
         requested_date=requested_date,
         requested_time=requested_time,
     )
-    with duckdb.connect(str(DB_PATH), read_only=True) as db:
-        try:
-            result = predict_stop_addition(request, _loaded_artifacts(), db)
-        except HTTPException as exc:
-            raise _tool_error(exc) from exc
+    with _tool_db() as db:
+        result = predict_stop_addition(request, _loaded_artifacts(), db)
     return result
 
 
@@ -511,11 +487,8 @@ def predict_general_stop_addition_demand(
         current_guzergah_kodu=current_guzergah_kodu,
         candidate_stop_uetds_yer_id=candidate_stop_uetds_yer_id,
     )
-    with duckdb.connect(str(DB_PATH), read_only=True) as db:
-        try:
-            result = predict_general_stop_addition(request, db)
-        except HTTPException as exc:
-            raise _tool_error(exc) from exc
+    with _tool_db() as db:
+        result = predict_general_stop_addition(request, db)
     return result
 
 

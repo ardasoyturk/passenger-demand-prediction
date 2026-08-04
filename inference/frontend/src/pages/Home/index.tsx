@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import { ChartNoAxesCombined, LoaderCircle, TriangleAlert } from 'lucide-preact';
-import { ApiError, getRoute, predict, predictGeneral } from '../../api';
+import { getRoute, predict, predictGeneral } from '../../api';
 import type { GeneralPrediction, GeneralPredictionRequest, PredictionRequest, RouteDetailResponse, SimplifiedPrediction } from '../../api';
 import { PredictionForm } from '../../components/PredictionForm';
 import type { PredictionFormRequest } from '../../components/PredictionForm';
@@ -9,6 +9,7 @@ import { PredictionResult } from '../../components/PredictionResult';
 import { GeneralPredictionResult } from '../../components/GeneralPredictionResult';
 import { RouteMap } from '../../components/RouteMap';
 import { RouteTimeline } from '../../components/RouteTimeline';
+import { errorMessage } from '../../lib/errors';
 
 type Result =
 	| { status: 'idle' }
@@ -23,17 +24,20 @@ export function Home() {
 	async function handleSubmit(submission: PredictionFormRequest) {
 		setResult({ status: 'loading' });
 		try {
-			if (submission.mode === 'general') {
-				const { request } = submission;
-				const [prediction, route] = await Promise.allSettled([predictGeneral(request), getRoute(request.firma_id, request.guzergah_kodu)]);
-				if (prediction.status === 'rejected') throw prediction.reason;
-				setResult({ status: 'success', mode: 'general', prediction: prediction.value, route: route.status === 'fulfilled' ? route.value : null, request });
-				return;
-			}
-			const { request } = submission;
-			const [prediction, route] = await Promise.allSettled([predict(request), getRoute(request.firma_id, request.guzergah_kodu)]);
+			const predictionRequest = submission.mode === 'general'
+				? predictGeneral(submission.request)
+				: predict(submission.request);
+			const [prediction, route] = await Promise.allSettled([
+				predictionRequest,
+				getRoute(submission.request.firma_id, submission.request.guzergah_kodu),
+			]);
 			if (prediction.status === 'rejected') throw prediction.reason;
-			setResult({ status: 'success', mode: 'trip', prediction: prediction.value, route: route.status === 'fulfilled' ? route.value : null, request });
+			const routeValue = route.status === 'fulfilled' ? route.value : null;
+			if (submission.mode === 'general') {
+				setResult({ status: 'success', mode: 'general', prediction: prediction.value as GeneralPrediction, route: routeValue, request: submission.request });
+			} else {
+				setResult({ status: 'success', mode: 'trip', prediction: prediction.value as SimplifiedPrediction, route: routeValue, request: submission.request });
+			}
 		} catch (error) {
 			setResult({ status: 'error', message: errorMessage(error) });
 		}
@@ -61,43 +65,7 @@ export function Home() {
 				</div>
 			)}
 
-			{result.status === 'success' && result.mode === 'trip' && (
-				<div class="mt-6 space-y-4">
-					<PredictionContext
-						heading="Tahmin sonucu"
-						companyId={result.request.firma_id}
-						companyTitle={result.route?.firma_unvan}
-						routeCode={result.request.guzergah_kodu}
-						date={result.request.sefer_tarihi}
-						time={result.request.sefer_saati}
-					/>
-					<PredictionResult prediction={result.prediction} />
-					{result.route ? (
-						<>
-							<RouteTimeline duraklar={result.route.duraklar} />
-							<RouteMap duraklar={result.route.duraklar} />
-						</>
-					) : <div class="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">Tahmin hazır; güzergâh durakları alınamadı.</div>}
-				</div>
-			)}
-
-			{result.status === 'success' && result.mode === 'general' && (
-				<div class="mt-6 space-y-4">
-					<PredictionContext
-						heading="Genel talep tahmini"
-						companyId={result.request.firma_id}
-						companyTitle={result.route?.firma_unvan}
-						routeCode={result.request.guzergah_kodu}
-					/>
-					<GeneralPredictionResult prediction={result.prediction} />
-					{result.route ? (
-						<>
-							<RouteTimeline duraklar={result.route.duraklar} />
-							<RouteMap duraklar={result.route.duraklar} />
-						</>
-					) : <div class="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">Tahmin hazır; güzergâh durakları alınamadı.</div>}
-				</div>
-			)}
+			{result.status === 'success' && <PredictionSuccess result={result} />}
 		</div>
 	);
 }
@@ -110,7 +78,25 @@ function ErrorBanner({ message }: { message: string }) {
 	return <div class="animate-enter mt-6 flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700" role="alert"><TriangleAlert class="mt-0.5 size-4 shrink-0" aria-hidden="true" /><div><strong class="font-medium">Tahmin oluşturulamadı.</strong> <span>{message}</span></div></div>;
 }
 
-function errorMessage(error: unknown): string {
-	if (error instanceof Error) return error instanceof ApiError ? `Sunucu yanıtı: ${error.message}` : error.message;
-	return 'Bilinmeyen bir hata oluştu.';
+function PredictionSuccess({ result }: { result: Extract<Result, { status: 'success' }> }) {
+	const trip = result.mode === 'trip';
+	return (
+		<div class="mt-6 space-y-4">
+			<PredictionContext
+				heading={trip ? 'Tahmin sonucu' : 'Genel talep tahmini'}
+				companyId={result.request.firma_id}
+				companyTitle={result.route?.firma_unvan}
+				routeCode={result.request.guzergah_kodu}
+				date={trip ? result.request.sefer_tarihi : undefined}
+				time={trip ? result.request.sefer_saati : undefined}
+			/>
+			{trip ? <PredictionResult prediction={result.prediction} /> : <GeneralPredictionResult prediction={result.prediction} />}
+			{result.route ? (
+				<>
+					<RouteTimeline duraklar={result.route.duraklar} />
+					<RouteMap duraklar={result.route.duraklar} />
+				</>
+			) : <div class="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">Tahmin hazır; güzergâh durakları alınamadı.</div>}
+		</div>
+	);
 }

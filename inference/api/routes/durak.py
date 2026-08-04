@@ -10,10 +10,21 @@ from inference.api.schemas import Durak, PaginatedDurakResponse
 
 router = APIRouter(prefix="/durak", tags=["durak"])
 
-_DURAK_COLUMNS = """
-    id, uetds_kodu, turu, uetds_adi, il_id, ilce_id, kisa_adi,
-    ulke_id, ulke_adi, enlem, boylam
-"""
+DURAK_COLUMNS = (
+    "id",
+    "uetds_kodu",
+    "turu",
+    "uetds_adi",
+    "il_id",
+    "ilce_id",
+    "kisa_adi",
+    "ulke_id",
+    "ulke_adi",
+    "enlem",
+    "boylam",
+)
+DURAK_SELECT = ", ".join(DURAK_COLUMNS)
+_DURAK_COLUMNS = DURAK_SELECT
 
 
 @router.get("", response_model=PaginatedDurakResponse)
@@ -63,4 +74,3 @@ def get_durak(durak_id: int, db: Database) -> Durak:
     if row.empty:
         raise HTTPException(status_code=404, detail="Durak not found")
     return Durak.model_validate(row.iloc[0].to_dict())
-

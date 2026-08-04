@@ -1,4 +1,5 @@
 import type { RouteDurak } from '../api';
+import { stopName } from '../lib/display';
 
 export function RouteTimeline({ duraklar }: { duraklar: RouteDurak[] }) {
 	if (!duraklar.length) return <p class="rounded-lg border border-border bg-white p-5 text-sm text-muted-foreground">Bu güzergâh için durak bilgisi bulunamadı.</p>;
@@ -30,5 +31,3 @@ export function RouteTimeline({ duraklar }: { duraklar: RouteDurak[] }) {
 		</section>
 	);
 }
-
-function stopName(stop: RouteDurak) { return stop.durak_adi ?? stop.kisa_adi ?? `Durak ${stop.durak_id}`; }

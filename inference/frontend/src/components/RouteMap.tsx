@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'preact/hooks';
 import 'leaflet/dist/leaflet.css';
 
 import type { RouteDurak } from '../api';
+import { stopName } from '../lib/display';
 
 type MappedStop = RouteDurak & { enlem: number; boylam: number };
 
@@ -126,10 +127,6 @@ function hasCoordinates(stop: RouteDurak): stop is MappedStop {
 		&& stop.boylam >= -180
 		&& stop.boylam <= 180
 	);
-}
-
-function stopName(stop: RouteDurak) {
-	return stop.durak_adi ?? stop.kisa_adi ?? `Durak ${stop.durak_id}`;
 }
 
 function stopLabel(stop: RouteDurak, totalStops: number) {
