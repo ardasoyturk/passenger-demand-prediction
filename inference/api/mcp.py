@@ -41,7 +41,10 @@ mcp = FastMCP(
     "Passenger Demand and Route Intelligence",
     instructions=(
         "Use these tools to obtain passenger-demand predictions and factual "
-        "route or stop data. Never invent values; call the matching tool."
+        "route or stop data. Never invent values; call the matching tool. "
+        "For a route number given without a company ID, use get_route_details "
+        "because the number may be either a canonical route ID or a "
+        "company-specific route code."
     ),
 )
 
@@ -124,7 +127,10 @@ def get_canonical_route_details(canonical_guzergah_id: int) -> dict:
             [canonical_guzergah_id],
         ).fetchall()
         if not aliases:
-            raise ValueError("Canonical route not found")
+            # A bare number is often a company-specific route code rather
+            # than a canonical ID. Preserve this legacy tool while allowing
+            # callers that selected it to recover through the general lookup.
+            return get_route_details(canonical_guzergah_id)
         detail = get_route(int(aliases[0][0]), int(aliases[0][1]), db)
     return {
         "canonical_guzergah_id": canonical_guzergah_id,
@@ -137,6 +143,104 @@ def get_canonical_route_details(canonical_guzergah_id: int) -> dict:
             for row in aliases
         ],
         "duraklar": [stop.model_dump(mode="json") for stop in detail.duraklar],
+    }
+
+
+@mcp.tool
+def get_route_details(guzergah_id: int) -> dict:
+    """Resolve a route number supplied without a company ID.
+
+    A bare route number can be either a ``canonical_guzergah_id`` or a
+    company-specific ``guzergah_kodu``. Always use this tool when the user
+    gives only one route number (for example, "62182 nolu guzergah"). It
+    checks both identifier types. If the number is a company route code, the
+    result includes every matching company route; ask the user to choose a
+    company only when more than one company uses that code.
+
+    Returns the route stops directly when exactly one route is resolved. A
+    canonical match includes all of its company-specific aliases.
+    """
+    with _tool_db() as db:
+        canonical_aliases = db.execute(
+            """
+            SELECT
+                route.firma_id::INTEGER,
+                route.guzergah_kodu::INTEGER,
+                company.unvan
+            FROM guzergah_canonical AS route
+            LEFT JOIN ats_firma AS company ON company.firma_id = route.firma_id
+            WHERE route.canonical_guzergah_id = ?
+            ORDER BY route.firma_id, route.guzergah_kodu
+            """,
+            [guzergah_id],
+        ).fetchall()
+        company_matches = db.execute(
+            """
+            SELECT
+                route.firma_id::INTEGER,
+                route.guzergah_kodu::INTEGER,
+                route.canonical_guzergah_id,
+                company.unvan
+            FROM guzergah_canonical AS route
+            LEFT JOIN ats_firma AS company ON company.firma_id = route.firma_id
+            WHERE route.guzergah_kodu = ?
+            ORDER BY route.firma_id
+            """,
+            [guzergah_id],
+        ).fetchall()
+
+        if not canonical_aliases and not company_matches:
+            raise ValueError("No canonical route ID or company route code found")
+
+        canonical_detail = None
+        if canonical_aliases:
+            canonical_detail = get_route(
+                int(canonical_aliases[0][0]), int(canonical_aliases[0][1]), db
+            )
+
+        resolved_company_routes = {
+            (int(row[0]), int(row[1])) for row in canonical_aliases
+        } | {(int(row[0]), int(row[1])) for row in company_matches}
+        resolved_route_count = len(resolved_company_routes)
+        detail = None
+        if resolved_route_count == 1:
+            firma_id, guzergah_kodu = resolved_company_routes.pop()
+            detail = get_route(firma_id, guzergah_kodu, db)
+
+    return {
+        "input_guzergah_id": guzergah_id,
+        "matched_canonical_guzergah_id": guzergah_id if canonical_aliases else None,
+        "canonical_company_routes": [
+            {
+                "firma_id": int(row[0]),
+                "guzergah_kodu": int(row[1]),
+                "firma_unvan": row[2],
+            }
+            for row in canonical_aliases
+        ],
+        "canonical_route": (
+            {
+                "canonical_guzergah_id": guzergah_id,
+                "duraklar": [
+                    stop.model_dump(mode="json")
+                    for stop in canonical_detail.duraklar
+                ],
+            }
+            if canonical_detail is not None
+            else None
+        ),
+        "matched_company_routes": [
+            {
+                "firma_id": int(row[0]),
+                "guzergah_kodu": int(row[1]),
+                "canonical_guzergah_id": int(row[2]),
+                "firma_unvan": row[3],
+            }
+            for row in company_matches
+        ],
+        "requires_company_selection": len(company_matches) > 1,
+        "has_identifier_type_ambiguity": bool(canonical_aliases and company_matches),
+        "route": detail.model_dump(mode="json") if detail is not None else None,
     }
 
 

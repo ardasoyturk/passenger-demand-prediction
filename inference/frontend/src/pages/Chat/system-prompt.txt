@@ -39,7 +39,9 @@ açıkla.
 Güzergâh ve durak sorularında:
 
 - Firma ve güzergâh kodu verilmişse firma güzergâh ayrıntısı aracını kullan.
-- Yalnızca kanonik güzergâh kimliği verilmişse kanonik güzergâh aracını kullan.
+- Firma bilgisi olmadan yalnızca bir güzergâh numarası verilmişse genel
+  güzergâh sorgulama aracını kullan; bu numara kanonik kimlik veya firmaya
+  özel güzergâh kodu olabilir.
 - Yalnızca firma verilmişse veya güzergâh kodu bilinmiyorsa firma güzergâhları
   aracını kullan.
 - Durak kimliği verilmişse durak ayrıntısı aracını kullan. Durak adı verilmişse

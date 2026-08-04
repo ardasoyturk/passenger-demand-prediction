@@ -45,6 +45,7 @@ export function Chat() {
 	const [input, setInput] = useState('');
 	const [streaming, setStreaming] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [responseStartId, setResponseStartId] = useState<string | null>(null);
 	const abortRef = useRef<AbortController | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -55,6 +56,21 @@ export function Chat() {
 		const el = scrollRef.current;
 		if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
 	}, [messages, streaming, error]);
+
+	// A long answer (especially one with a map) must open at its first line.
+	// Further output is only followed when the user has deliberately remained
+	// at the bottom of the conversation.
+	useEffect(() => {
+		if (!responseStartId) return;
+		const scrollArea = scrollRef.current;
+		const message = scrollArea?.querySelector<HTMLElement>(`[data-message-id="${responseStartId}"]`);
+		if (scrollArea && message) {
+			const offset = message.getBoundingClientRect().top - scrollArea.getBoundingClientRect().top;
+			scrollArea.scrollTo({ top: Math.max(0, scrollArea.scrollTop + offset - 20) });
+			pinnedRef.current = false;
+		}
+		setResponseStartId(null);
+	}, [messages, responseStartId]);
 
 	useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -74,7 +90,8 @@ export function Chat() {
 		resetTextarea();
 		setError(null);
 		setStreaming(true);
-		pinnedRef.current = true;
+		pinnedRef.current = false;
+		setResponseStartId(assistantId);
 		const controller = new AbortController();
 		abortRef.current = controller;
 		let mcpClient: Awaited<ReturnType<typeof createPredictionMCPClient>> | undefined;
@@ -95,8 +112,16 @@ export function Chat() {
 				maxRetries: 1,
 				temperature: 0.2
 			});
-			for await (const delta of result.textStream) {
-				setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m)));
+			let streamError: unknown;
+			for await (const part of result.fullStream) {
+				if (part.type === 'text-delta') {
+					setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + part.text } : m)));
+				} else if (part.type === 'error') {
+					streamError = part.error;
+				}
+			}
+			if (streamError !== undefined) {
+				throw streamError;
 			}
 			const maps = mapsFromToolResults(await result.toolResults);
 			if (maps.length > 0) {
@@ -284,7 +309,7 @@ function MessageBubble({ message, active }: { message: ChatMessage; active: bool
 	const displayedContent = useTypewriterText(message.content, active && message.role === 'assistant');
 	if (message.role === 'user') {
 		return (
-			<div class="flex justify-end">
+			<div data-message-id={message.id} class="flex justify-end">
 				<div class="max-w-[85%] whitespace-pre-wrap break-words rounded-lg bg-muted px-4 py-2.5 text-sm leading-relaxed sm:max-w-[75%]">
 					{message.content}
 				</div>
@@ -295,7 +320,7 @@ function MessageBubble({ message, active }: { message: ChatMessage; active: bool
 	const waiting = active && displayedContent === '';
 	const isTyping = displayedContent.length < message.content.length;
 	return (
-		<div class="flex gap-3">
+		<div data-message-id={message.id} class="flex gap-3">
 			<span class="mt-0.5 grid size-7 shrink-0 place-items-center rounded-md bg-primary text-white">
 				<Bot class="size-4" aria-hidden="true" />
 			</span>
@@ -333,7 +358,11 @@ function mapsFromToolResults(toolResults: Awaited<ReturnType<typeof streamText>>
 	const maps: ChatMap[] = [];
 	for (const result of toolResults) {
 		if (result.type !== 'tool-result') continue;
-		if (result.toolName === 'get_company_route_details' || result.toolName === 'get_canonical_route_details') {
+		if (
+			result.toolName === 'get_company_route_details'
+			|| result.toolName === 'get_canonical_route_details'
+			|| result.toolName === 'get_route_details'
+		) {
 			const duraklar = routeStops(result.output);
 			if (duraklar.length > 0) {
 				maps.push({
@@ -362,8 +391,16 @@ function mapsFromToolResults(toolResults: Awaited<ReturnType<typeof streamText>>
 
 function routeStops(value: unknown): RouteDurak[] {
 	value = unwrapMcpToolOutput(value);
-	if (!isRecord(value) || !Array.isArray(value.duraklar)) return [];
-	return value.duraklar.flatMap((stop) => {
+	if (!isRecord(value)) return [];
+	// The unscoped route lookup may resolve a company route (`route`) or a
+	// canonical route (`canonical_route`); both retain the standard stop shape.
+	const route = isRecord(value.route)
+		? value.route
+		: isRecord(value.canonical_route)
+			? value.canonical_route
+			: value;
+	if (!Array.isArray(route.duraklar)) return [];
+	return route.duraklar.flatMap((stop) => {
 		const parsed = routeStopFromResult(stop);
 		return parsed ? [parsed] : [];
 	});
