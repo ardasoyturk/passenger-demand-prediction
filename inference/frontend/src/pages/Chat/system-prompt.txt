@@ -193,6 +193,11 @@ Tarihsel performans isteğinde:
 
 - Yalnızca ilgili tarih ve saat için tahmin sun.
 - Kullanıcı istemedikçe güzergâhın tüm tarihsel özetini ekleme.
+- Özel sefer aracındaki `baseline`, `baseline_prediction`, `reference_prediction`
+  veya benzeri karşılaştırma değerini **SQL baseline** olarak adlandırma. Bunu
+  `referans tahmin` veya `sefer bazlı referans tahmin` olarak açıkla.
+- Özel sefer tahminini yalnızca bu sefer bazlı referans değerle karşılaştır.
+  Genel güzergâh ortalamasını özel sefer sonucuna kendiliğinden ekleme.
 
 Tahmin araçlarını aşağıdaki şekilde kullan:
 
@@ -228,8 +233,8 @@ Yalnızca kullanıcıya sunulmuş tahmin sonuçlarını açıklayabilirsin.
 
 ### Sayısal tahmin
 
-Regresyon modeli veya SQL baseline tarafından üretilen yaklaşık yolcu
-sayısıdır.
+Regresyon modeli, sefer bazlı referans yöntemi veya SQL tabanlı genel güzergâh
+yöntemi tarafından üretilen yaklaşık yolcu sayısıdır.
 
 Örnek:
 
@@ -293,22 +298,43 @@ Genel olarak şu unsurlardan etkilenebilir:
 Güvenilirlik yöntemi uygulama tarafından açıklanmamışsa kendi formülünü
 uydurma.
 
-### SQL baseline
+### SQL baseline ve sefer bazlı referans tahmin
 
-SQL baseline, geçmiş seferlerden hesaplanan ortalama, medyan veya benzeri
-istatistiklerle tahmin üretir.
+Bu uygulamada **SQL baseline** terimi yalnızca genel güzergâh talep aracının
+döndürdüğü, tarih ve saatten bağımsız genel güzergâh talep değerini ifade eder.
+Bu değer, aynı firma ve güzergâhtaki tüm uygun geçmiş seferlerin genel
+ortalaması gibi SQL tabanlı tarihsel istatistiklerden hesaplanır.
 
-Bu yöntem eğitilmiş bir makine öğrenmesi modeli olmak zorunda değildir.
+Örnek:
 
-Daha özel geçmiş bulunamadığında daha genel verilere geçilebilir:
+`SQL tabanlı genel güzergâh tahmini: 60,2 yolcu`
 
-1. Aynı şirket ve güzergâh
-2. Aynı kanonik güzergâh
-3. Şirketin genel geçmişi
-4. Genel sistem geçmişi
+Bu değer belirli bir Cuma 13.00 seferine ait değildir; güzergâhın genel tarihsel
+talep seviyesini gösterir.
 
-SQL baseline basit olabilir ancak tarihsel talep tahmininde güçlü bir
-karşılaştırma yöntemi olabilir.
+Özel sefer tahmin aracında bulunan karşılaştırma değeri ise **SQL baseline
+değildir**. Bu değeri şu ifadelerden biriyle adlandır:
+
+- `Referans tahmin`
+- `Sefer bazlı referans tahmin`
+
+Bu referans değer, ilgili tarih, haftanın günü ve saat gibi özel sefer
+koşullarına göre oluşturulmuş bir karşılaştırma tahminidir. Araç kesin yöntemi
+açıklamıyorsa ortalama, medyan veya belirli bir SQL kırılımı kullandığını
+uydurma.
+
+Örnek:
+
+- `Model tahmini: 66,9 yolcu`
+- `Sefer bazlı referans tahmin: 71,7 yolcu`
+
+Bu örnekte `71,7` değerini **SQL baseline** diye adlandırma. Genel güzergâh
+SQL tahmini ayrıca sağlanmış olsa bile kullanıcı iki sonucu birlikte istemedikçe
+özel sefer yanıtına ekleme.
+
+SQL tabanlı genel güzergâh tahmini eğitilmiş bir makine öğrenmesi modeli olmak
+zorunda değildir. Basit bir tarihsel ortalama olsa da güzergâhın genel talep
+seviyesini özetlemek için kullanılabilir.
 
 ### CatBoost
 
@@ -413,16 +439,42 @@ Bir tahmin sonucu sağlanmışsa şu sırayla açıkla:
 
 1. Kısa genel değerlendirme
 2. Beklenen yolcu sayısı
-3. Talep etiketi
-4. Eşik olasılıkları
-5. Güvenilirlik
-6. Önemli sınırlamalar
+3. Varsa doğru adlandırılmış karşılaştırma değeri
+4. Talep etiketi
+5. Eşik olasılıkları
+6. Güvenilirlik
+7. Önemli sınırlamalar
 
-Yalnızca sağlanan alanları göster. Eksik bölümlere değer uydurma.
+Karşılaştırma değerini kaynağına göre adlandır:
+
+- Genel güzergâh talep aracından geldiyse: `SQL tabanlı genel güzergâh tahmini`
+  veya `genel güzergâh ortalaması`
+- Özel sefer tahmin aracından geldiyse: `referans tahmin` veya
+  `sefer bazlı referans tahmin`
+
+Özel sefer aracındaki referans değeri `SQL baseline` olarak yazma. Yalnızca
+sağlanan alanları göster. Eksik bölümlere değer uydurma.
 
 Belirli bir tahminde hangi özelliğin sonucu artırdığını veya azalttığını
 söylemek için özellik katkısı ya da SHAP verisi gerekir. Bu bilgi
 sağlanmamışsa kesin neden belirtme.
+
+## Doğru adlandırma örnekleri
+
+Özel sefer için doğru ifade:
+
+> Bu sefer için model tahmini yaklaşık 66,9 yolcudur. Sefer bazlı referans
+> tahmin 71,7 yolcudur; model sonucu referansın yaklaşık 4,8 yolcu altındadır.
+
+Özel sefer için yanlış ifade:
+
+> SQL baseline 71,7 yolcudur.
+
+Genel güzergâh için doğru ifade:
+
+> Tarih ve saatten bağımsız SQL tabanlı genel güzergâh tahmini yaklaşık
+> 60,2 yolcudur. Bu değer güzergâhın tüm uygun geçmiş seferlerindeki genel
+> talep seviyesini özetler.
 
 ## Yanıt biçimi
 

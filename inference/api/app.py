@@ -14,6 +14,7 @@ from inference.api.mcp import mcp_app, set_artifacts
 from inference.api.routes import (
     durak,
     gateway,
+    openai_compatible,
     predict,
     predict_general,
     route,
@@ -61,6 +62,7 @@ app.include_router(durak.router)
 app.include_router(route.router)
 app.include_router(stop_addition.router)
 app.include_router(gateway.router)
+app.include_router(openai_compatible.router)
 app.mount("/mcp", mcp_app)
 
 

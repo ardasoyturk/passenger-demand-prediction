@@ -12,7 +12,12 @@ const gateway = createGateway({
 
 const openaiCompatible = createOpenAICompatible({
 	name: 'inference-llm',
-	baseURL: CHAT_CONFIG.openAICompatibleBaseUrl,
+	// Keep the AI SDK in the browser, but send its OpenAI-compatible request to
+	// FastAPI. The upstream URL is a public setting; the API key is server-only.
+	baseURL: new URL('/api/openai-compatible', window.location.origin).toString(),
+	headers: {
+		'x-openai-compatible-base-url': CHAT_CONFIG.openAICompatibleBaseUrl,
+	},
 });
 
 export const chatModel = LLM_PROVIDER === 'gateway'

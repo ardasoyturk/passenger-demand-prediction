@@ -25,10 +25,12 @@ repository-root `.env` used by `npm run backend`. FastAPI relays
 `/api/gateway/language-model` to Vercel AI Gateway and injects the key
 server-side; the browser never receives it.
 
-To use an OpenAI-compatible endpoint, change `provider` and
-`openAICompatibleBaseUrl` in `src/pages/Chat/config.ts`. Use a backend relay
-for endpoints that require credentials; do not put credentials in frontend
-configuration.
+To use an OpenAI-compatible endpoint, change `provider`, `model`, and
+`openAICompatibleBaseUrl` in `src/pages/Chat/config.ts`, then set
+`OPENAI_COMPATIBLE_API_KEY` in the repository-root `.env`. The AI SDK still
+runs in the frontend, but its request is sent to
+`/api/openai-compatible/{path}`; FastAPI adds the key before forwarding it.
+The key is never included in the frontend bundle or browser request.
 
 Build or preview the production bundle with:
 

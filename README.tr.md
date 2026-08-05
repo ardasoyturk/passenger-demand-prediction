@@ -352,7 +352,10 @@ paketine dahil edildiği için API anahtarı içermemelidir.
 FastAPI, `/api/gateway/language-model` isteklerini Vercel AI Gateway'e iletir
 ve anahtarı yalnızca sunucu tarafında ekler. Anahtar hiçbir zaman tarayıcıya
 gönderilmez. Kimlik bilgisi gerektiren OpenAI-uyumlu bir uç nokta için de API
-anahtarını arayüz yapılandırmasına koymak yerine arka yüz aktarım katmanı kullanın.
+anahtarını arayüz yapılandırmasına koymak yerine `.env` içindeki
+`OPENAI_COMPATIBLE_API_KEY` değerini kullanan `/api/openai-compatible/{path}`
+arka yüz aktarım katmanını kullanın. `provider`, `model` ve OpenAI-uyumlu temel
+adres yine `inference/frontend/src/pages/Chat/config.ts` içinden seçilir.
 
 ## Gelecekteki değişiklikler için kurallar
 

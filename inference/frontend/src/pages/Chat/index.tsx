@@ -10,6 +10,7 @@ import { chatModel } from './llm';
 import { createPredictionMCPClient } from './mcp';
 import { getSystemPrompt } from './system-prompt';
 import { errorMessage } from '../../lib/errors';
+import { CHAT_CONFIG } from './config';
 
 interface ChatMessage {
 	id: string;
@@ -217,6 +218,7 @@ export function Chat({ compact = false }: { compact?: boolean }) {
 					</span>
 					<div class="min-w-0">
 						<h1 class="truncate text-sm font-semibold">Yapay Zekâ Asistanı</h1>
+						<h2 class="truncate text-xs font-light text-gray-700">{CHAT_CONFIG.model}</h2>
 					</div>
 					{messages.length > 0 && (
 						<button

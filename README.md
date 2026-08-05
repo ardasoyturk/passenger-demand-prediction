@@ -337,6 +337,14 @@ npm run frontend
 
 Vite proxies `/api` requests to the local FastAPI server. Use `npm run frontend:build` to write the production frontend to `inference/frontend/dist/`.
 
+The `/chat` page keeps its browser-safe provider, model, OpenAI-compatible
+base URL, and MCP URL in `inference/frontend/src/pages/Chat/config.ts`. When
+`provider` is `openai-compatible`, the AI SDK sends its request through
+`/api/openai-compatible/{path}`. FastAPI reads `OPENAI_COMPATIBLE_API_KEY`
+from the repository-root `.env`, adds it as a Bearer credential, and relays
+the request and response stream to the configured OpenAI-compatible API.
+The credential is never bundled into the frontend.
+
 ## Rules for future changes
 
 - Use DuckDB for large scans, joins, grouped statistics, and quantiles; fetch only completed model matrices into pandas.

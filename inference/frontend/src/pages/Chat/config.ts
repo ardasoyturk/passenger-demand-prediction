@@ -2,7 +2,8 @@
  * Browser-safe chat configuration.
  *
  * Do not add API keys here: this file is bundled and sent to every browser.
- * The Gateway credential is configured only on the FastAPI server.
+ * Credentials for both server-side model relays are configured only on the
+ * FastAPI server.
  */
 export type LLMProvider = 'gateway' | 'openai-compatible';
 
@@ -13,9 +14,9 @@ export const CHAT_CONFIG: {
 	openAICompatibleBaseUrl: string;
 	mcpUrl: string;
 } = {
-	provider: 'gateway',
-	model: 'xiaomi/mimo-v2.5',
+	provider: 'openai-compatible',
+	model: 'inclusionai/ling-3.0-flash:free',
 	gatewayBaseUrl: '/api/gateway',
-	openAICompatibleBaseUrl: 'http://localhost:1234/v1',
+	openAICompatibleBaseUrl: 'https://openrouter.ai/api/v1',
 	mcpUrl: '/api/mcp/',
 };
