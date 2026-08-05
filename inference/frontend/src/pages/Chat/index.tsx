@@ -19,6 +19,11 @@ interface ChatMessage {
 	maps?: ChatMap[];
 }
 
+interface ToolCallStatus {
+	id: string;
+	toolName: string;
+}
+
 interface ChatMap {
 	id: string;
 	title: string;
@@ -56,6 +61,7 @@ export function Chat({ compact = false }: { compact?: boolean }) {
 	const [input, setInput] = useState('');
 	const [streaming, setStreaming] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [activeToolCalls, setActiveToolCalls] = useState<ToolCallStatus[]>([]);
 	const [responseStartId, setResponseStartId] = useState<string | null>(null);
 	const abortRef = useRef<AbortController | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
@@ -112,6 +118,7 @@ export function Chat({ compact = false }: { compact?: boolean }) {
 		setInput('');
 		resetTextarea();
 		setError(null);
+		setActiveToolCalls([]);
 		setStreaming(true);
 		pinnedRef.current = false;
 		setResponseStartId(assistantId);
@@ -139,6 +146,16 @@ export function Chat({ compact = false }: { compact?: boolean }) {
 			for await (const part of result.fullStream) {
 				if (part.type === 'text-delta') {
 					setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + part.text } : m)));
+				} else if (part.type === 'tool-input-start') {
+					setActiveToolCalls((prev) => prev.some((call) => call.id === part.id)
+						? prev
+						: [...prev, { id: part.id, toolName: part.toolName }]);
+				} else if (part.type === 'tool-call') {
+					setActiveToolCalls((prev) => prev.some((call) => call.id === part.toolCallId)
+						? prev.map((call) => (call.id === part.toolCallId ? { ...call, toolName: part.toolName } : call))
+						: [...prev, { id: part.toolCallId, toolName: part.toolName }]);
+				} else if (part.type === 'tool-result' || part.type === 'tool-error' || part.type === 'tool-output-denied') {
+					setActiveToolCalls((prev) => prev.filter((call) => call.id !== part.toolCallId));
 				} else if (part.type === 'error') {
 					streamError = part.error;
 				}
@@ -158,6 +175,7 @@ export function Chat({ compact = false }: { compact?: boolean }) {
 			}
 		} finally {
 			await mcpClient?.close();
+			setActiveToolCalls([]);
 			setStreaming(false);
 			abortRef.current = null;
 			textareaRef.current?.focus();
@@ -218,7 +236,7 @@ export function Chat({ compact = false }: { compact?: boolean }) {
 					</span>
 					<div class="min-w-0">
 						<h1 class="truncate text-sm font-semibold">Yapay Zekâ Asistanı</h1>
-						<h2 class="truncate text-xs font-light text-gray-700">{CHAT_CONFIG.model}</h2>
+						<h2 class="truncate text-xs font-light text-gray-700 font-mono">{CHAT_CONFIG.model}</h2>
 					</div>
 					{messages.length > 0 && (
 						<button
@@ -243,6 +261,7 @@ export function Chat({ compact = false }: { compact?: boolean }) {
 								key={message.id}
 								message={message}
 								active={streaming && index === messages.length - 1 && message.role === 'assistant'}
+								toolCalls={streaming && index === messages.length - 1 && message.role === 'assistant' ? activeToolCalls : []}
 							/>
 						))}
 					</div>
@@ -376,7 +395,7 @@ function EmptyState({ compact, onSuggestion }: { compact: boolean; onSuggestion:
 	);
 }
 
-function MessageBubble({ message, active }: { message: ChatMessage; active: boolean }) {
+function MessageBubble({ message, active, toolCalls }: { message: ChatMessage; active: boolean; toolCalls: ToolCallStatus[] }) {
 	const displayedContent = useTypewriterText(message.content, active && message.role === 'assistant');
 	if (message.role === 'user') {
 		return (
@@ -396,6 +415,17 @@ function MessageBubble({ message, active }: { message: ChatMessage; active: bool
 				<Bot class="size-4" aria-hidden="true" />
 			</span>
 			<div class="min-w-0 flex-1 pt-0.5">
+				{toolCalls.length > 0 && (
+					<div class="mb-2 flex max-w-full flex-col items-start gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs text-muted-foreground" role="status" aria-live="polite">
+						{toolCalls.map((toolCall) => (
+							<div key={toolCall.id} class="inline-flex max-w-full items-center gap-2">
+								<LoaderCircle class="size-3.5 shrink-0 animate-spin text-primary" aria-hidden="true" />
+								<span class="shrink-0">Araç yanıtı bekleniyor:</span>
+								<code class="min-w-0 break-all font-mono text-[0.6875rem] text-foreground">{toolCall.toolName}</code>
+							</div>
+						))}
+					</div>
+				)}
 				{waiting ? (
 					<span class="inline-flex items-center gap-2 text-sm text-muted-foreground" role="status">
 						<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />

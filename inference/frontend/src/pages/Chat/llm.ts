@@ -11,7 +11,9 @@ const gateway = createGateway({
 });
 
 const openaiCompatible = createOpenAICompatible({
-	name: 'inference-llm',
+	// The OpenAI-compatible adapter uses the `google` metadata key for Gemini
+	// thought signatures. Keep this name aligned so signatures survive tool loops.
+	name: 'google',
 	// Keep the AI SDK in the browser, but send its OpenAI-compatible request to
 	// FastAPI. The upstream URL is a public setting; the API key is server-only.
 	baseURL: new URL('/api/openai-compatible', window.location.origin).toString(),

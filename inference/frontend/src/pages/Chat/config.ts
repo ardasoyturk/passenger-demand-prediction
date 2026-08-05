@@ -15,8 +15,10 @@ export const CHAT_CONFIG: {
 	mcpUrl: string;
 } = {
 	provider: 'openai-compatible',
-	model: 'inclusionai/ling-3.0-flash:free',
+	// openrouter: model: 'inclusionai/ling-3.0-flash:free',
+	model: 'gemini-3.5-flash-lite',
 	gatewayBaseUrl: '/api/gateway',
-	openAICompatibleBaseUrl: 'https://openrouter.ai/api/v1',
+	// openrouter: openAICompatibleBaseUrl: 'https://openrouter.ai/api/v1',
+	openAICompatibleBaseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
 	mcpUrl: '/api/mcp/',
 };
