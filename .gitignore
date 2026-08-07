@@ -24,8 +24,28 @@ dist-ssr
 *.sln
 *.sw?
 
-models
-results
+# Model artifacts: track only the files consumed by the inference runtime
+models/*
+!models/catboost_demand_model_v4_1_recent_mae_6000.cbm
+!models/catboost_demand_model_v4_4_classifier_ge_10_class_weights_none.cbm
+!models/catboost_demand_model_v4_4_classifier_ge_10_class_weights_none_metadata.json
+!models/catboost_demand_model_v4_4_classifier_ge_20_class_weights_none.cbm
+!models/catboost_demand_model_v4_4_classifier_ge_20_class_weights_none_metadata.json
+!models/catboost_demand_model_v4_4_classifier_ge_30_class_weights_none.cbm
+!models/catboost_demand_model_v4_4_classifier_ge_30_class_weights_none_metadata.json
+!models/catboost_demand_model_v4_4_classifier_ge_43.cbm
+!models/catboost_demand_model_v4_4_classifier_ge_43_metadata.json
+!models/stop_addition/
+models/stop_addition/*
+!models/stop_addition/stop_addition_demand_selected.cbm
+!models/stop_addition/stop_addition_demand_model_summary.json
+
+# Result artifacts: track only the files consumed by the inference runtime
+results/*
+!results/catboost_v4_2_hybrid_rule.json
+!results/stop_addition/
+results/stop_addition/*
+!results/stop_addition/one_stop_route_pairs.csv
 
 # Logs
 logs

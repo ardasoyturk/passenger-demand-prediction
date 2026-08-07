@@ -1,0 +1,43 @@
+{
+  "schema_version": "catboost_v4_2_hybrid_rule_v1",
+  "frozen_on_period": "validation_2025_h1",
+  "validation_history_end_exclusive": "2025-01-01",
+  "validation_target_end_exclusive": "2025-07-01",
+  "v3_model": "models\\catboost_demand_model_v3_mae_6000.cbm",
+  "v4_1_model": "models\\catboost_demand_model_v4_1_recent_mae_6000.cbm",
+  "selection": {
+    "mae_tolerance_above_v4_1": 0.01,
+    "metric_equality_tolerance": 1e-06,
+    "primary_metric": "rmse",
+    "tie_breakers": [
+      "mae",
+      "lower_weights",
+      "lower_activation"
+    ],
+    "candidate_count": 10000,
+    "selected_metrics": {
+      "mae": 9.853707119465918,
+      "rmse": 14.590293016937803,
+      "bias": -1.644496521856671,
+      "activation_rate": 0.1855853686358509,
+      "average_weight": 0.06237489279543045
+    }
+  },
+  "semantics": {
+    "blend": "v4_1 + weight * (baseline - v4_1)",
+    "upward_only": true,
+    "moderate": "p90 >= threshold OR above_60_rate >= threshold",
+    "strong": "p90 >= strong_p90_threshold OR above_100_rate meets threshold",
+    "zero_above_100_threshold_means": "above_100_rate > 0",
+    "strong_p90_offset": 20.0
+  },
+  "rule": {
+    "minimum_count": 10,
+    "p90_threshold": 50.0,
+    "strong_p90_threshold": 70.0,
+    "above_60_rate_threshold": 0.05,
+    "above_100_rate_threshold": 0.1,
+    "moderate_weight": 0.3,
+    "strong_weight": 0.4
+  }
+}
