@@ -8,7 +8,7 @@ Model; firma, firmaya ait güzergâh kodu, sefer tarihi ve kalkış saatini alı
 
 > **Hedef değişken:** `SEFER_SAYISI` (bu projede yolcu talebi olarak kullanılır)<br>
 > **Veri:** 2023-01-01 ile 2026-04-14 arasında 9.103.971 temizlenmiş sefer kaydı<br>
-> **Mevcut servis adayı:** v4.2 hibrit sayısal tahmin + v4.4 eşik sınıflandırıcıları
+> **Mevcut production modelleri:** v4.2 hibrit sayısal tahmin + v4.4 eşik sınıflandırıcıları
 
 ## Depo yapısı
 
@@ -207,7 +207,7 @@ Bu sonuç bir karar desteğidir, kârlılık tahmini değildir. Bilet fiyatını
 kapasitesini, işletme maliyetini veya mesafe kontrolü dışındaki operasyonel
 uygulanabilirliği modellemez.
 
-## Üretim tahmin akışı
+## Production pipeline'ı ne yapar? 
 
 Her teklif için yalnızca önerilen sefer tarihinden **kesin olarak önceki** kayıtlar kullanılır. Hedef sızıntısını önleyen temel kural budur.
 
