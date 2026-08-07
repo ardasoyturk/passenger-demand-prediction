@@ -75,7 +75,7 @@ uv sync
 
 Before serving predictions, confirm that `analysis.duckdb`, the required frozen model files in `models/`, and `results/catboost_v4_2_hybrid_rule.json` are present. The database is read during inference; the inference pipeline does not train models, change model files, or write permanent database objects.
 
-The database, frozen models, experiment results, and local evaluation archive are intentionally excluded from version control because they are large or machine-specific. A submission cloned from Git therefore needs `analysis.duckdb`, `models/`, and the required `results/` files provisioned separately before inference or the API demo can run. The optional stop-addition fixtures are also supplied separately under `archive/` when needed.
+The frozen serving models and the small runtime result files (the v4.2 hybrid rule and the stop-addition route options) are committed to Git with Git LFS, so a fresh clone already contains them. `analysis.duckdb` is large and remains out of version control; provide it separately before inference or the API demo can run. Experiment outputs under `results/` that are not part of the frozen serving set, and the local evaluation archive, also remain excluded from Git.
 
 ## Data model and cleaning
 

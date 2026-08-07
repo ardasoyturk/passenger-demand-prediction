@@ -78,12 +78,11 @@ uv sync
 
 Tahminden önce `analysis.duckdb`, `models/` altındaki gerekli model dosyaları ve `results/catboost_v4_2_hybrid_rule.json` mevcut olmalıdır. Tahmin sistemi veritabanını yalnızca okur; model eğitmez, kayıtlı dosyaları değiştirmez ve veritabanına kalıcı tablo ya da görünüm yazmaz.
 
-Veritabanı, dondurulmuş modeller, deney çıktıları ve yerel değerlendirme
-dosyaları büyük boyutlu veya ortama özgü oldukları için sürüm kontrolüne dahil
-edilmez. Bu depoyu Git üzerinden klonladıktan sonra tahmin ya da API demosunu
-çalıştırabilmek için `analysis.duckdb`, `models/` ve gerekli `results/`
-dosyalarını ayrıca sağlamanız gerekir. İsteğe bağlı durak ekleme test
-dosyaları da gerektiğinde `archive/` altında ayrıca temin edilmelidir.
+Production’da kullanılan frozen model dosyaları ve gerekli küçük artifact’lar (v4.2 hybrid rule ve stop-addition route seçenekleri dahil) Git LFS üzerinden version control’e alınmıştır. Bu nedenle fresh clone sonrasında gerekli model dosyaları repository ile birlikte indirilebilir.
+
+`analysis.duckdb` dosyası boyutu nedeniyle version control dışında tutulmaktadır. Prediction pipeline’ını veya API demo’sunu çalıştırabilmek için bu dosyanın ayrıca sağlanması gerekir.
+
+Frozen bundle dışında kalan experiment output’ları (`results/`) ve local evaluation archive Git’e dahil edilmez. Opsiyonel stop-addition test dosyaları gerektiğinde `archive/` altında ayrıca sağlanmalıdır.
 
 ## Veri yapısı ve temizleme işlemleri
 
