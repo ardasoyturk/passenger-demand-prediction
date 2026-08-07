@@ -75,6 +75,8 @@ uv sync
 
 Before serving predictions, confirm that `analysis.duckdb`, the required frozen model files in `models/`, and `results/catboost_v4_2_hybrid_rule.json` are present. The database is read during inference; the inference pipeline does not train models, change model files, or write permanent database objects.
 
+The database, frozen models, experiment results, and local evaluation archive are intentionally excluded from version control because they are large or machine-specific. A submission cloned from Git therefore needs `analysis.duckdb`, `models/`, and the required `results/` files provisioned separately before inference or the API demo can run. The optional stop-addition fixtures are also supplied separately under `archive/` when needed.
+
 ## Data model and cleaning
 
 `analysis.duckdb` is the main database. `model_data_base` is the model-facing trip relation and contains the trip ID, departure date and time, company and route IDs, canonical route ID, target, calendar fields, departure minute, and 30-minute departure bucket. The target is copied from `SEFER_SAYISI` and is limited to the cleaned range 1–300.
@@ -326,7 +328,9 @@ exposes scheduled demand inference at `POST /predict`, general route demand at
 `POST /predict-general`, scheduled stop-addition evaluation at
 `POST /predict-stop-addition`, and time-independent stop-addition evaluation at
 `POST /predict-stop-addition-general`. It also provides `GET /health`, stop
-lookup under `GET /durak`, and company-route lookup under `GET /route`.
+lookup under `GET /durak`, company-route lookup under `GET /route`, and
+historically observed stop-addition options at
+`GET /stop-addition/available-routes`.
 
 In a second terminal, install packages and start the frontend:
 
@@ -338,12 +342,19 @@ npm run frontend
 Vite proxies `/api` requests to the local FastAPI server. Use `npm run frontend:build` to write the production frontend to `inference/frontend/dist/`.
 
 The `/chat` page keeps its browser-safe provider, model, OpenAI-compatible
-base URL, and MCP URL in `inference/frontend/src/pages/Chat/config.ts`. When
-`provider` is `openai-compatible`, the AI SDK sends its request through
-`/api/openai-compatible/{path}`. FastAPI reads `OPENAI_COMPATIBLE_API_KEY`
-from the repository-root `.env`, adds it as a Bearer credential, and relays
-the request and response stream to the configured OpenAI-compatible API.
-The credential is never bundled into the frontend.
+base URL, and MCP URL in `inference/frontend/src/pages/Chat/config.ts`. The
+current default is `provider: 'openai-compatible'`: the AI SDK sends its
+request through `/api/openai-compatible/{path}`, and FastAPI reads
+`OPENAI_COMPATIBLE_API_KEY` from the repository-root `.env`, adds it as a
+Bearer credential, and relays the request and response stream to the
+configured OpenAI-compatible API. The credential is never bundled into the
+frontend.
+
+The chat page can alternatively use the Vercel AI Gateway by changing
+`provider` to `'gateway'`. That mode sends requests through
+`/api/gateway/language-model`; FastAPI reads `AI_GATEWAY_API_KEY` from the
+repository-root `.env` and injects it server-side. Neither credential is
+bundled into the frontend.
 
 ## Rules for future changes
 

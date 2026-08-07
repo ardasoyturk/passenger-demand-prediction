@@ -78,6 +78,13 @@ uv sync
 
 Tahminden önce `analysis.duckdb`, `models/` altındaki gerekli model dosyaları ve `results/catboost_v4_2_hybrid_rule.json` mevcut olmalıdır. Tahmin sistemi veritabanını yalnızca okur; model eğitmez, kayıtlı dosyaları değiştirmez ve veritabanına kalıcı tablo ya da görünüm yazmaz.
 
+Veritabanı, dondurulmuş modeller, deney çıktıları ve yerel değerlendirme
+dosyaları büyük boyutlu veya ortama özgü oldukları için sürüm kontrolüne dahil
+edilmez. Bu depoyu Git üzerinden klonladıktan sonra tahmin ya da API demosunu
+çalıştırabilmek için `analysis.duckdb`, `models/` ve gerekli `results/`
+dosyalarını ayrıca sağlamanız gerekir. İsteğe bağlı durak ekleme test
+dosyaları da gerektiğinde `archive/` altında ayrıca temin edilmelidir.
+
 ## Veri yapısı ve temizleme işlemleri
 
 `analysis.duckdb` projenin ana veritabanıdır. Modelin kullandığı `model_data_base` tablosunda sefer kimliği, kalkış tarihi ve saati, firma ve güzergâh kimlikleri, kanonik güzergâh kimliği, hedef değişken, takvim alanları, gün içindeki dakika ve 30 dakikalık kalkış dilimi bulunur. Hedef değişken `SEFER_SAYISI` alanından gelir ve temizlenmiş veride 1–300 aralığındadır.
@@ -330,8 +337,9 @@ talep tahmini için `POST /predict`, genel rota talebi için
 `POST /predict-general`, sefer bazlı durak ekleme değerlendirmesi için
 `POST /predict-stop-addition` ve gün ile saat gerektirmeyen durak ekleme
 değerlendirmesi için `POST /predict-stop-addition-general` uçlarını sunar.
-Ayrıca `GET /health`, `GET /durak` altında durak sorguları ve `GET /route`
-altında firma güzergâh sorguları bulunur.
+Ek olarak, `GET /health` sağlık denetimi sağlar; `GET /durak` durakları,
+`GET /route` firma güzergâhlarını ve `GET /stop-addition/available-routes`
+geçmişte gözlenmiş durak ekleme seçeneklerini sorgulamak için kullanılır.
 
 Başka bir terminalde arayüzü çalıştırın:
 
@@ -347,15 +355,18 @@ LLM temel adresi ve MCP uç noktası)
 `inference/frontend/src/pages/Chat/config.ts` içinde bulunur. Bu dosya arayüz
 paketine dahil edildiği için API anahtarı içermemelidir.
 
-`AI_GATEWAY_API_KEY` yalnızca FastAPI arka yüzünde yapılandırılmalıdır;
-örneğin `npm run backend` komutunun kullandığı depo kökündeki `.env` dosyasında.
-FastAPI, `/api/gateway/language-model` isteklerini Vercel AI Gateway'e iletir
-ve anahtarı yalnızca sunucu tarafında ekler. Anahtar hiçbir zaman tarayıcıya
-gönderilmez. Kimlik bilgisi gerektiren OpenAI-uyumlu bir uç nokta için de API
-anahtarını arayüz yapılandırmasına koymak yerine `.env` içindeki
-`OPENAI_COMPATIBLE_API_KEY` değerini kullanan `/api/openai-compatible/{path}`
-arka yüz aktarım katmanını kullanın. `provider`, `model` ve OpenAI-uyumlu temel
-adres yine `inference/frontend/src/pages/Chat/config.ts` içinden seçilir.
+Varsayılan yapılandırmada `provider` değeri `'openai-compatible'` olarak
+ayarlanmıştır. Bu modda AI SDK istekleri
+`/api/openai-compatible/{path}` üzerinden gönderir. FastAPI, depo kökündeki
+`.env` dosyasından `OPENAI_COMPATIBLE_API_KEY` değerini okur, Bearer kimlik
+bilgisini sunucu tarafında ekler ve isteği yapılandırılmış OpenAI-uyumlu uca
+iletir. API anahtarı hiçbir zaman tarayıcıya gönderilmez.
+
+Alternatif olarak, `provider` değeri `'gateway'` yapılarak Vercel AI Gateway
+kullanılabilir. Bu modda istekler `/api/gateway/language-model` üzerinden
+iletilir. `AI_GATEWAY_API_KEY` yalnızca FastAPI arka yüzünde, örneğin
+`npm run backend` komutunun kullandığı depo kökündeki `.env` dosyasında
+yapılandırılır. Her iki modda da kimlik bilgileri arayüz paketine dahil edilmez.
 
 ## Gelecekteki değişiklikler için kurallar
 
